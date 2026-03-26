@@ -67,14 +67,25 @@ async def get_rank_by_puuid(puuid: str, region: str) -> list:
 async def get_live_game_by_puuid(puuid: str, region: str) -> dict | None:
     try:
         platform = REGIONS.get(region.upper(), "euw1")
-        url = f"https://{platform}.api.riotgames.com/lol/spectator/v5/active-games/by-summoner/{puuid}"
-        async with httpx.AsyncClient() as client:
-            res = await client.get(url, headers=HEADERS)
-            if res.status_code == 404:
-                return None
-            res.raise_for_status()
-            return res.json()
-    except Exception:
+
+        urls = [
+            f"https://{platform}.api.riotgames.com/lol/spectator/v5/active-games/by-puuid/{puuid}",
+            f"https://{platform}.api.riotgames.com/lol/spectator/v4/active-games/by-summoner/{puuid}",
+        ]
+        async with httpx.AsyncClient(timeout=10) as client:
+            for url in urls:
+                res = await client.get(url, headers=HEADERS)
+                if res.status_code == 404:
+                    return None
+                if res.status_code == 403:
+                    continue  # essaie l'URL suivante
+                res.raise_for_status()
+                return res.json()
+
+        return None
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"get_live_game_by_puuid error: {e}")
         return None
 
 
@@ -97,21 +108,9 @@ async def get_match_history(puuid: str, region: str, count: int = 10) -> list:
 
 
 async def get_match_result(puuid: str, riot_game_id: str, region: str) -> dict | None:
-    """
-    Récupère le résultat d'une partie terminée via MATCH-V5.
-    Cherche parmi les derniers matchs du joueur celui qui correspond au riot_game_id.
-
-    Retourne :
-        {
-            "winner_team": "blue" | "red",
-            "first_blood": "ChampionName" | None,
-        }
-    ou None si la partie n'est pas encore disponible.
-    """
     try:
         routing = ROUTING.get(region.upper(), "europe")
 
-        # Récupérer les IDs des derniers matchs du joueur
         url = f"https://{routing}.api.riotgames.com/lol/match/v5/matches/by-puuid/{puuid}/ids?count=5"
         async with httpx.AsyncClient(timeout=10) as client:
             res = await client.get(url, headers=HEADERS)
@@ -119,22 +118,16 @@ async def get_match_result(puuid: str, riot_game_id: str, region: str) -> dict |
                 return None
             match_ids = res.json()
 
-        # Chercher la partie correspondante
-        # Le riot_game_id du spectator (ex: "8149059668") est le gameId numérique
-        # Le match_id MATCH-V5 est au format "EUW1_8149059668"
         target_match_id = None
         for mid in match_ids:
-            # Extraire la partie numérique : "EUW1_8149059668" → "8149059668"
             numeric_part = mid.split("_")[-1]
             if numeric_part == str(riot_game_id):
                 target_match_id = mid
                 break
 
         if not target_match_id:
-            # Pas encore disponible dans MATCH-V5
             return None
 
-        # Récupérer les détails du match
         url = f"https://{routing}.api.riotgames.com/lol/match/v5/matches/{target_match_id}"
         async with httpx.AsyncClient(timeout=10) as client:
             res = await client.get(url, headers=HEADERS)
@@ -145,14 +138,12 @@ async def get_match_result(puuid: str, riot_game_id: str, region: str) -> dict |
         participants = match_data["info"]["participants"]
         teams        = match_data["info"]["teams"]
 
-        # Trouver l'équipe gagnante (teamId 100 = blue, 200 = red)
         winner_team = None
         for team in teams:
             if team.get("win"):
                 winner_team = "blue" if team["teamId"] == 100 else "red"
                 break
 
-        # Trouver le first blood
         first_blood_champ = None
         for p in participants:
             if p.get("firstBloodKill"):

@@ -113,7 +113,7 @@
 .gp-player-name {
   font-family: 'Outfit', sans-serif;
   font-size: 18px;
-  color: #e8eaf0;
+  color: #696969;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -121,7 +121,7 @@
 .gp-player-pseudo {
   font-family: 'Outfit', sans-serif;
   font-size: 24px;
-  font-weight: 700;
+  font-weight: 1000;
   color: #e8eaf0;
   white-space: nowrap;
   overflow: hidden;

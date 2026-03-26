@@ -12,56 +12,7 @@ from fastapi.responses import Response
 
 router = APIRouter(prefix="/players", tags=["players"])
 
-# Spell IDs → rôle certain
-SMITE    = 11  # → JUNGLE (100% certain)
-EXHAUST  = 3   # → SUPPORT (très probable)
-BARRIER  = 21  # → SUPPORT ou ADC
-HEAL     = 7   # → ADC ou SUPPORT
-TELEPORT = 12  # → TOP ou MID (rarement ADC/SUPP)
-IGNITE   = 14  # → MID, TOP ou SUPP
-
-
-def get_spell_role(s1: int, s2: int) -> str | None:
-    spells = {s1, s2}
-    if SMITE   in spells: return "JUNGLE"
-    if EXHAUST in spells: return "SUPPORT"
-    return None
-
-
-def build_team(participants: list, team_id: int) -> list:
-    team = [p for p in participants if p.get("teamId") == team_id]
-
-    # Étape 1 : détecter les rôles certains via spells
-    assigned = {}
-    for i, p in enumerate(team):
-        role = get_spell_role(p.get("spell1Id", 0), p.get("spell2Id", 0))
-        if role:
-            assigned[i] = role
-
-    # Étape 2 : attribuer les rôles restants par ordre canonique
-    all_roles    = ["TOP", "JUNGLE", "MID", "ADC", "SUPPORT"]
-    taken_roles  = set(assigned.values())
-    free_roles   = [r for r in all_roles if r not in taken_roles]
-    free_indices = [i for i in range(len(team)) if i not in assigned]
-
-    for i, idx in enumerate(free_indices):
-        assigned[idx] = free_roles[i] if i < len(free_roles) else "?"
-
-    result = []
-    for i, p in enumerate(team):
-        champ_name = (p.get("championName") or "").strip()
-        result.append({
-            "puuid":        (p.get("puuid") or "").strip() or None,
-            "summonerName": extract_pseudo(p, champ_name),
-            "championId":   p.get("championId"),
-            "championName": champ_name,
-            "teamId":       team_id,
-            "role":         assigned.get(i, "?"),
-            "spell1Id":     p.get("spell1Id"),
-            "spell2Id":     p.get("spell2Id"),
-        })
-    return result
-
+SMITE = 11
 
 def extract_pseudo(p: dict, champ_name: str) -> str:
     riot_id = (p.get("riotId") or "").strip()
@@ -77,13 +28,34 @@ def extract_pseudo(p: dict, champ_name: str) -> str:
         return sn
     return riot_id if riot_id else ""
 
+# Dans ton fichier backend
+def build_team(participants: list, team_id: int) -> list:
+    team = [p for p in participants if p.get("teamId") == team_id]
+    
+    result = []
+    for p in team:
+        champ_name = (p.get("championName") or "").strip()
+        # Détection basique du Smite pour aider le front
+        spells = {p.get("spell1Id", 0), p.get("spell2Id", 0)}
+        role_guess = "JUNGLE" if SMITE in spells else None
+        
+        result.append({
+            "puuid":        (p.get("puuid") or "").strip() or None,
+            "summonerName": extract_pseudo(p, champ_name),
+            "championId":   p.get("championId"),
+            "championName": champ_name,
+            "teamId":       team_id,
+            "role":         role_guess, # On laisse le front affiner ou l'utilisateur voir
+            "spell1Id":     p.get("spell1Id"),
+            "spell2Id":     p.get("spell2Id"),
+        })
+    return result
 
 @router.get("/proxy/icon")
 async def proxy_icon(url: str):
     async with httpx.AsyncClient() as client:
         res = await client.get(url)
         return Response(content=res.content, media_type="image/png")
-
 
 @router.get("/search/autocomplete")
 def autocomplete(q: str, db: Session = Depends(get_db)):
@@ -93,50 +65,49 @@ def autocomplete(q: str, db: Session = Depends(get_db)):
         SearchedPlayer.summoner_name.ilike(f"%{q}%")
     ).order_by(SearchedPlayer.last_updated.desc()).limit(5).all()
     return [{"summoner_name": p.summoner_name, "tag_line": p.tag_line, "region": p.region,
-             "tier": p.tier, "rank": p.rank, "profile_icon_url": p.profile_icon_url}
-            for p in results]
-
+             "tier": p.tier, "rank": p.rank, "profile_icon_url": p.profile_icon_url} for p in results]
 
 @router.get("/{region}/{game_name}/{tag_line}")
 async def get_player(region: str, game_name: str, tag_line: str, db: Session = Depends(get_db)):
-
     cached = db.query(SearchedPlayer).filter(
         SearchedPlayer.summoner_name.ilike(game_name),
         SearchedPlayer.tag_line.ilike(tag_line),
         SearchedPlayer.region == region.upper()
     ).first()
-
     cache_valid = cached and (datetime.utcnow() - cached.last_updated) < timedelta(minutes=5)
 
     if not cache_valid:
         try:
-            account   = await riot.get_account_by_riot_id(game_name, tag_line, region)
-            puuid     = account["puuid"]
-            summoner  = await riot.get_summoner_by_puuid(puuid, region)
+            account  = await riot.get_account_by_riot_id(game_name, tag_line, region)
+            puuid    = account["puuid"]
+            summoner = await riot.get_summoner_by_puuid(puuid, region)
             rank_data = await riot.get_rank_by_puuid(puuid, region)
             solo_rank = next((r for r in rank_data if r["queueType"] == "RANKED_SOLO_5x5"), None)
             profile_icon_url = f"https://ddragon.leagueoflegends.com/cdn/14.10.1/img/profileicon/{summoner['profileIconId']}.png"
-
-            existing_by_puuid = db.query(SearchedPlayer).filter(SearchedPlayer.riot_puuid == puuid).first()
-
-            if existing_by_puuid:
-                existing_by_puuid.summoner_name = game_name; existing_by_puuid.tag_line = tag_line
-                existing_by_puuid.region = region.upper(); existing_by_puuid.tier = solo_rank["tier"] if solo_rank else None
-                existing_by_puuid.rank = solo_rank["rank"] if solo_rank else None
-                existing_by_puuid.lp = solo_rank["leaguePoints"] if solo_rank else 0
-                existing_by_puuid.profile_icon_url = profile_icon_url; existing_by_puuid.last_updated = datetime.utcnow()
-                player = existing_by_puuid
+            existing = db.query(SearchedPlayer).filter(SearchedPlayer.riot_puuid == puuid).first()
+            if existing:
+                existing.summoner_name = game_name; existing.tag_line = tag_line
+                existing.region = region.upper()
+                existing.tier = solo_rank["tier"] if solo_rank else None
+                existing.rank = solo_rank["rank"] if solo_rank else None
+                existing.lp = solo_rank["leaguePoints"] if solo_rank else 0
+                existing.profile_icon_url = profile_icon_url
+                existing.last_updated = datetime.utcnow()
+                player = existing
             elif cached:
-                cached.riot_puuid = puuid; cached.tier = solo_rank["tier"] if solo_rank else None
+                cached.riot_puuid = puuid
+                cached.tier = solo_rank["tier"] if solo_rank else None
                 cached.rank = solo_rank["rank"] if solo_rank else None
                 cached.lp = solo_rank["leaguePoints"] if solo_rank else 0
-                cached.profile_icon_url = profile_icon_url; cached.last_updated = datetime.utcnow()
+                cached.profile_icon_url = profile_icon_url
+                cached.last_updated = datetime.utcnow()
                 player = cached
             else:
                 player = SearchedPlayer(riot_puuid=puuid, summoner_name=game_name, tag_line=tag_line,
                     region=region.upper(), tier=solo_rank["tier"] if solo_rank else None,
                     rank=solo_rank["rank"] if solo_rank else None,
-                    lp=solo_rank["leaguePoints"] if solo_rank else 0, profile_icon_url=profile_icon_url)
+                    lp=solo_rank["leaguePoints"] if solo_rank else 0,
+                    profile_icon_url=profile_icon_url)
                 db.add(player)
             db.commit(); db.refresh(player)
         except Exception as e:
@@ -146,13 +117,11 @@ async def get_player(region: str, game_name: str, tag_line: str, db: Session = D
 
     live_game_raw  = await riot.get_live_game_by_puuid(player.riot_puuid, region)
     live_game_data = None
-
     if live_game_raw:
         riot_game_id = str(live_game_raw.get("gameId", ""))
         participants = live_game_raw.get("participants", [])
         blue_team = build_team(participants, 100)
         red_team  = build_team(participants, 200)
-
         existing_game = db.query(LiveGame).filter(LiveGame.riot_game_id == riot_game_id).first()
         if existing_game:
             existing_game.duration_seconds = live_game_raw.get("gameLength", 0)
@@ -165,7 +134,6 @@ async def get_player(region: str, game_name: str, tag_line: str, db: Session = D
                 blue_team=blue_team, red_team=red_team,
                 duration_seconds=live_game_raw.get("gameLength", 0), status="live")
             db.add(saved_game); db.commit(); db.refresh(saved_game)
-
         live_game_data = {"id": saved_game.id, "riot_game_id": saved_game.riot_game_id,
             "gameQueueConfigId": live_game_raw.get("gameQueueConfigId"),
             "gameLength": live_game_raw.get("gameLength", 0),
@@ -200,8 +168,7 @@ async def get_player(region: str, game_name: str, tag_line: str, db: Session = D
         "player": {"summoner_name": player.summoner_name, "tag_line": player.tag_line,
             "region": player.region, "tier": player.tier, "rank": player.rank,
             "lp": player.lp, "profile_icon_url": player.profile_icon_url},
-        "live_game": live_game_data, "match_history": matches,
-        "jinxit_profile": jinxit_profile,
+        "live_game": live_game_data, "match_history": matches, "jinxit_profile": jinxit_profile,
         "pro_player": {"name": pro_player.name, "team": pro_player.team, "role": pro_player.role,
             "accent_color": pro_player.accent_color, "photo_url": pro_player.photo_url,
             "team_logo_url": pro_player.team_logo_url} if pro_player else None,

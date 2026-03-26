@@ -1,22 +1,40 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from database import get_db
 from models.bet import Bet
 from models.live_game import LiveGame
 from models.user import User
 from models.bet_type import BetType
+from models.transaction import Transaction
 from deps import get_current_user
 
 router = APIRouter(prefix="/bets", tags=["bets"])
 
+VALID_BET_TYPES = {"who_wins", "first_blood"}
+VALID_WIN_VALUES = {"blue", "red"}
+
 
 class PlaceBetSchema(BaseModel):
     live_game_id:  int
-    bet_type_slug: str          # "who_wins" | "first_blood"
-    bet_value:     str          # "blue" | "red" | championName
+    bet_type_slug: str
+    bet_value:     str
     amount:        int
     card_used_id:  int | None = None
+
+    @validator("amount")
+    def amount_must_be_positive(cls, v):
+        if v < 1:
+            raise ValueError("Le montant doit être >= 1")
+        if v > 100_000:
+            raise ValueError("Le montant ne peut pas dépasser 100 000 coins")
+        return v
+
+    @validator("bet_type_slug")
+    def valid_bet_type(cls, v):
+        if v not in VALID_BET_TYPES:
+            raise ValueError(f"Type de pari invalide : {v}")
+        return v
 
 
 @router.post("/place")
@@ -32,12 +50,25 @@ def place_bet(
     if not bet_type:
         raise HTTPException(400, "Type de pari invalide ou inactif")
 
+    # Validation de bet_value selon le type
+    if body.bet_type_slug == "who_wins" and body.bet_value not in VALID_WIN_VALUES:
+        raise HTTPException(400, "Valeur invalide pour who_wins (blue ou red)")
+
     game = db.query(LiveGame).filter(
         LiveGame.id == body.live_game_id,
         LiveGame.status == "live",
     ).first()
     if not game:
         raise HTTPException(400, "Partie introuvable ou déjà terminée")
+
+    # Validation de bet_value pour first_blood (doit être un champion de la game)
+    if body.bet_type_slug == "first_blood":
+        all_champs = [
+            p.get("championName") for p in (game.blue_team or []) + (game.red_team or [])
+            if p.get("championName")
+        ]
+        if body.bet_value not in all_champs:
+            raise HTTPException(400, f"Champion '{body.bet_value}' introuvable dans cette partie")
 
     existing = db.query(Bet).filter(
         Bet.user_id == current_user.id,
@@ -47,8 +78,11 @@ def place_bet(
     if existing:
         raise HTTPException(400, "Tu as déjà placé ce type de pari sur cette partie")
 
-    if current_user.coins < body.amount:
-        raise HTTPException(400, f"Pas assez de coins ({current_user.coins} disponibles, {body.amount} requis)")
+    # ✅ SELECT FOR UPDATE — évite la race condition sur les coins
+    user = db.query(User).filter(User.id == current_user.id).with_for_update().first()
+
+    if user.coins < body.amount:
+        raise HTTPException(400, f"Pas assez de coins ({user.coins} disponibles, {body.amount} requis)")
 
     boost = 0.0
     if body.card_used_id:
@@ -62,10 +96,10 @@ def place_bet(
             raise HTTPException(400, "Tu ne possèdes pas cette carte")
         boost = user_card.card.boost_value or 0.0
 
-    current_user.coins -= body.amount
+    user.coins -= body.amount
 
     bet = Bet(
-        user_id=current_user.id,
+        user_id=user.id,
         live_game_id=body.live_game_id,
         card_used_id=body.card_used_id,
         bet_type_slug=body.bet_type_slug,
@@ -76,21 +110,21 @@ def place_bet(
     )
     db.add(bet)
 
-    from models.transaction import Transaction
     db.add(Transaction(
-        user_id=current_user.id,
+        user_id=user.id,
         type="bet_placed",
         amount=-body.amount,
-        description=f"Pari placé sur {bet_type.label}",
+        description=f"Pari placé sur {bet_type.label} — {body.bet_value}",
     ))
+
     db.commit()
     db.refresh(bet)
 
     return {
-        "bet_id":        bet.id,
-        "amount":        body.amount,
-        "boost_applied": boost,
-        "coins_restants": current_user.coins,
+        "bet_id":         bet.id,
+        "amount":         body.amount,
+        "boost_applied":  boost,
+        "coins_restants": user.coins,
     }
 
 
@@ -106,13 +140,17 @@ def get_my_bets(
         .all()
     )
 
-    result = []
-    for b in bets:
-        game = db.query(LiveGame).filter(LiveGame.id == b.live_game_id).first()
-        result.append({
+    # ✅ Une seule requête pour toutes les games (évite le N+1)
+    game_ids = {b.live_game_id for b in bets}
+    games = {
+        g.id: g for g in db.query(LiveGame).filter(LiveGame.id.in_(game_ids)).all()
+    } if game_ids else {}
+
+    return [
+        {
             "id":            b.id,
             "live_game_id":  b.live_game_id,
-            "game_status":   game.status if game else "ended",  # "live" | "ended"
+            "game_status":   games[b.live_game_id].status if b.live_game_id in games else "ended",
             "bet_type":      b.bet_type_slug,
             "bet_value":     b.bet_value,
             "amount":        b.amount,
@@ -120,6 +158,6 @@ def get_my_bets(
             "status":        b.status,
             "payout":        b.payout,
             "created_at":    b.created_at,
-        })
-
-    return result
+        }
+        for b in bets
+    ]

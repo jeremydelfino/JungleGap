@@ -1,7 +1,9 @@
 import asyncio
 import logging
 
-# ✅ Importer tous les modèles pour que SQLAlchemy resolve les FK au commit
+from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
+
 import models.user
 import models.card
 import models.player
@@ -13,7 +15,6 @@ import models.transaction
 import models.user_card
 import models.pro_player
 
-from sqlalchemy.orm import Session
 from database import SessionLocal
 from models.pro_player import ProPlayer
 from models.live_game import LiveGame
@@ -25,11 +26,27 @@ from services.riot import get_live_game_by_puuid, get_match_result
 logger = logging.getLogger(__name__)
 
 
+def extract_summoner_name(p: dict) -> str:
+    return (
+        p.get("riotIdGameName") or
+        p.get("gameName") or
+        p.get("summonerName") or
+        ""
+    )
+
+
+def build_participant(p: dict) -> dict:
+    return {
+        "puuid":        p.get("puuid", ""),
+        "summonerName": extract_summoner_name(p),
+        "championId":   p.get("championId"),
+        "championName": p.get("championName", ""),
+        "teamId":       p.get("teamId"),
+        "role":         p.get("individualPosition", "") or p.get("position", ""),
+    }
+
+
 async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
-    """
-    Résout les paris pending d'une game terminée.
-    Appelé en background — retry MATCH-V5 jusqu'à 5 fois (1 min entre chaque).
-    """
     db: Session = SessionLocal()
     try:
         game = db.query(LiveGame).filter(LiveGame.id == game_id).first()
@@ -42,7 +59,6 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
             logger.warning(f"resolve_bets: pas de puuid pour game {game_id}")
             return
 
-        # Retry jusqu'à 5 fois — MATCH-V5 peut prendre quelques minutes
         result = None
         for attempt in range(5):
             logger.info(f"   🔍 Tentative {attempt+1}/5 MATCH-V5 pour {riot_game_id}...")
@@ -61,16 +77,15 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
             return
 
         if not result:
-            # Rembourser si MATCH-V5 indisponible après 5 tentatives
             logger.error(f"   ❌ MATCH-V5 indisponible après 5 tentatives — remboursement")
             for bet in pending_bets:
                 bet.status = "cancelled"
-                user = db.query(User).filter(User.id == bet.user_id).first()
+                user = db.query(User).filter(User.id == bet.user_id).with_for_update().first()
                 if user:
                     user.coins += bet.amount
                     db.add(Transaction(
                         user_id=user.id,
-                        type="bet_placed",
+                        type="bet_refunded",
                         amount=bet.amount,
                         description="Pari annulé (résultat indisponible) — remboursement"
                     ))
@@ -86,12 +101,18 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
             if bet.bet_type_slug == "who_wins":
                 won = (bet.bet_value == winner_team)
             elif bet.bet_type_slug == "first_blood":
-                won = first_blood and bet.bet_value.lower() == first_blood.lower()
+                won = bool(first_blood) and bet.bet_value.lower() == first_blood.lower()
             else:
                 bet.status = "cancelled"
-                user = db.query(User).filter(User.id == bet.user_id).first()
+                user = db.query(User).filter(User.id == bet.user_id).with_for_update().first()
                 if user:
                     user.coins += bet.amount
+                    db.add(Transaction(
+                        user_id=user.id,
+                        type="bet_refunded",
+                        amount=bet.amount,
+                        description=f"Pari annulé (type inconnu : {bet.bet_type_slug})"
+                    ))
                 continue
 
             if won:
@@ -99,7 +120,7 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
                 payout = int(bet.amount * multiplier)
                 bet.status = "won"
                 bet.payout = payout
-                user = db.query(User).filter(User.id == bet.user_id).first()
+                user = db.query(User).filter(User.id == bet.user_id).with_for_update().first()
                 if user:
                     user.coins += payout
                     db.add(Transaction(
@@ -130,7 +151,7 @@ async def poll_pro_games():
         pros = db.query(ProPlayer).filter(
             ProPlayer.riot_puuid != None,
             ProPlayer.is_active == True
-        ).limit(20).all()
+        ).all()
 
         logger.info(f"🎮 Poll: vérification de {len(pros)} pros...")
 
@@ -148,32 +169,19 @@ async def poll_pro_games():
                         continue
                     processed_game_ids.add(riot_game_id)
 
+                    participants = live.get("participants", [])
+                    if participants:
+                        logger.info(f"   🔎 Sample participant: {participants[0]}")
+                    puuid_to_participant = {p.get("puuid"): p for p in participants}
+
                     existing = db.query(LiveGame).filter(
                         LiveGame.riot_game_id == riot_game_id
                     ).first()
 
                     if not existing:
-                        participants = live.get("participants", [])
-                        blue_team = [
-                            {
-                                "puuid":        p.get("puuid", ""),
-                                "summonerName": p.get("summonerName", ""),
-                                "championId":   p.get("championId"),
-                                "championName": p.get("championName", ""),
-                                "teamId":       p.get("teamId"),
-                            }
-                            for p in participants if p.get("teamId") == 100
-                        ]
-                        red_team = [
-                            {
-                                "puuid":        p.get("puuid", ""),
-                                "summonerName": p.get("summonerName", ""),
-                                "championId":   p.get("championId"),
-                                "championName": p.get("championName", ""),
-                                "teamId":       p.get("teamId"),
-                            }
-                            for p in participants if p.get("teamId") == 200
-                        ]
+                        blue_team = [build_participant(p) for p in participants if p.get("teamId") == 100]
+                        red_team  = [build_participant(p) for p in participants if p.get("teamId") == 200]
+
                         game = LiveGame(
                             searched_player_id=1,
                             riot_game_id=riot_game_id,
@@ -185,10 +193,39 @@ async def poll_pro_games():
                         )
                         db.add(game)
                         logger.info(f"   ✅ Nouvelle partie: {pro.name} ({riot_game_id})")
+
                     else:
                         existing.duration_seconds = live.get("gameLength", 0)
                         if existing.status == "ended":
                             existing.status = "live"
+
+                        # ✅ Auto-patch des noms vides à chaque poll
+                        needs_update = any(
+                            not p.get("summonerName")
+                            for p in (existing.blue_team or []) + (existing.red_team or [])
+                        )
+                        if needs_update:
+                            existing.blue_team = [
+                                {
+                                    **p,
+                                    "summonerName": extract_summoner_name(
+                                        puuid_to_participant.get(p.get("puuid"), p)
+                                    ) or p.get("summonerName", "")
+                                }
+                                for p in (existing.blue_team or [])
+                            ]
+                            existing.red_team = [
+                                {
+                                    **p,
+                                    "summonerName": extract_summoner_name(
+                                        puuid_to_participant.get(p.get("puuid"), p)
+                                    ) or p.get("summonerName", "")
+                                }
+                                for p in (existing.red_team or [])
+                            ]
+                            flag_modified(existing, "blue_team")
+                            flag_modified(existing, "red_team")
+                            logger.info(f"   🔄 Noms mis à jour pour game {riot_game_id}")
 
                 await asyncio.sleep(0.5)
 
@@ -196,19 +233,13 @@ async def poll_pro_games():
                 logger.error(f"   ❌ Erreur pour {pro.name}: {e}")
                 continue
 
-        # Détecter les games terminées
         active_games = db.query(LiveGame).filter(LiveGame.status == "live").all()
         games_to_resolve = []
 
         for game in active_games:
-            all_puuids = [
-                p.get("puuid") for p in (game.blue_team or []) + (game.red_team or [])
-                if p.get("puuid")
-            ]
-            still_live = any(puuid in puuids_in_game for puuid in all_puuids)
+            still_live = game.riot_game_id in processed_game_ids
 
             if not still_live:
-                # ✅ Marquer ended — NE JAMAIS supprimer (les paris y sont liés par FK)
                 game.status = "ended"
                 logger.info(f"   🏁 Game {game.riot_game_id} marquée ENDED")
 
@@ -218,15 +249,18 @@ async def poll_pro_games():
                 ).first()
 
                 if has_pending:
+                    all_puuids = [
+                        p.get("puuid") for p in (game.blue_team or []) + (game.red_team or [])
+                        if p.get("puuid")
+                    ]
                     pro = db.query(ProPlayer).filter(
                         ProPlayer.riot_puuid.in_(all_puuids)
                     ).first()
-                    region = pro.region if pro else "EUW"
+                    region = pro.region if pro else ("KR" if "KR" in (game.riot_game_id or "") else "EUW")
                     games_to_resolve.append((game.id, game.riot_game_id, region))
 
         db.commit()
 
-        # ✅ Résolution en background — ne bloque pas le poller
         for game_id, riot_game_id, region in games_to_resolve:
             logger.info(f"   🎯 Résolution background lancée pour game {game_id}")
             asyncio.create_task(resolve_bets_for_game(game_id, riot_game_id, region))

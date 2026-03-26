@@ -14,13 +14,6 @@ const REGIONS = [
   { value: 'TR',  label: 'TR',  color: '#ef4444' },
 ]
 
-const STATS = [
-  { icon: '⚡', val: '1,247', label: 'Parties en direct',       color: '#00e5ff', bg: '#00e5ff12' },
-  { icon: '🪙', val: '842K',  label: "Coins misés aujourd'hui", color: '#c89b3c', bg: '#c89b3c12' },
-  { icon: '🎯', val: '3,891', label: 'Paris actifs',            color: '#d946a8', bg: '#d946a812' },
-  { icon: '👥', val: '12,440',label: 'Joueurs inscrits',        color: '#22c55e', bg: '#22c55e12' },
-]
-
 function formatDuration(seconds) {
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
@@ -102,7 +95,6 @@ export default function Home() {
     setSearch('')
   }
 
-  // ✅ Uniquement les games avec un pro joueur détecté
   const games = liveGames
     .filter(g => g.pro !== null)
     .map(formatGameForCard)
@@ -176,19 +168,6 @@ export default function Home() {
             </div>
           )}
         </div>
-      </div>
-
-      {/* ─── STATS ─── */}
-      <div className="stats-bar">
-        {STATS.map((s, i) => (
-          <div className="stat-item" key={i}>
-            <div className="stat-icon" style={{ background: s.bg }}>{s.icon}</div>
-            <div>
-              <div className="stat-val" style={{ color: s.color }}>{s.val}</div>
-              <div className="stat-label">{s.label}</div>
-            </div>
-          </div>
-        ))}
       </div>
 
       {/* ─── GAMES ─── */}
