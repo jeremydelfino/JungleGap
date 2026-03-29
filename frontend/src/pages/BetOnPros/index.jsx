@@ -473,7 +473,7 @@ export default function BetOnPros() {
         <div className="bop-header-inner">
           <div>
             <div className="bop-eyebrow">Jungle Gap</div>
-            <div className="bop-title">BetOnPros</div>
+            <div className="bop-title">Ligues Professionnelles</div>
             <div className="bop-sub">Paris sur les matchs officiels LEC · LCK · LFL · LCS · LPL · Worlds</div>
           </div>
           <div className="bop-header-right">

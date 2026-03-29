@@ -489,63 +489,90 @@ async def trigger_refresh_standings(db: Session = Depends(get_db)):
     return {"success": True}
 
 
+class PlaceEsportsBetSchema(BaseModel):
+    match_id:  str
+    bet_type:  str
+    bet_value: str
+    amount:    int
+
+    @validator("amount")
+    def amount_valid(cls, v):
+        if v < 10:
+            raise ValueError("Mise minimum 10 coins")
+        if v > 100_000:
+            raise ValueError("Mise maximum 100 000 coins")
+        return v
+
+    @validator("bet_type")
+    def bet_type_valid(cls, v):
+        if v not in ("match_winner", "exact_score"):
+            raise ValueError("bet_type invalide")
+        return v
+
+# TA FONCTION @router.post("/bets/place") VIENT ENSUITE ICI
 @router.post("/bets/place")
 async def place_esports_bet(
-    body: "PlaceEsportsBetSchema",
+    body: PlaceEsportsBetSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # 1. Récupération du schedule pour vérifier le match
     try:
-        data   = await lolesports.get_schedule()
+        data = await lolesports.get_schedule()
         events = data.get("data", {}).get("schedule", {}).get("events", [])
-    except Exception:
-        raise HTTPException(502, "Impossible de vérifier le match")
+    except Exception as e:
+        print(f"Erreur API LoL Esports: {e}")
+        raise HTTPException(502, "Impossible de vérifier le match auprès de Riot")
 
+    # 2. Recherche de l'événement correspondant
     match_event = next(
         (ev for ev in events
          if ev.get("type") == "match" and ev.get("match", {}).get("id") == body.match_id),
         None,
     )
+
     if not match_event:
         raise HTTPException(404, "Match introuvable ou déjà terminé")
     if match_event.get("state") == "completed":
         raise HTTPException(400, "Ce match est déjà terminé")
 
-    match    = match_event.get("match", {})
-    teams    = match.get("teams", [])
+    # 3. Extraction des données et FIX du start_time
+    match_data = match_event.get("match", {})
+    teams = match_data.get("teams", [])
     if len(teams) < 2:
         raise HTTPException(400, "Données du match incomplètes")
 
-    t1, t2   = teams[0], teams[1]
-    bo       = match.get("strategy", {}).get("count", 3)
-    league   = match_event.get("league", {})
-    league_s = normalize_league_slug(league)   # ← FIX
+    t1, t2 = teams[0], teams[1]
+    bo = match_data.get("strategy", {}).get("count", 3)
+    league = match_event.get("league", {})
+    league_s = normalize_league_slug(league)
 
-    if body.bet_type == "match_winner":
-        if body.bet_value not in ("team1", "team2"):
-            raise HTTPException(400, "bet_value invalide pour match_winner")
-    elif body.bet_type == "exact_score":
-        valid_scores = SCORE_MULTIPLIERS.get(bo, SCORE_MULTIPLIERS[3]).keys()
-        parts        = body.bet_value.split("_", 1)
-        if len(parts) != 2 or parts[0] not in ("team1", "team2") or parts[1] not in valid_scores:
-            raise HTTPException(400, f"bet_value invalide pour exact_score (BO{bo})")
+    # Extraction sécurisée de la date de début
+    raw_start_time = match_event.get("startTime")
+    start_time = None
+    if raw_start_time:
+        try:
+            start_time = datetime.fromisoformat(raw_start_time.replace("Z", "+00:00"))
+        except Exception:
+            start_time = None
 
+    # 4. Vérifications métier (Doublons et Solde)
     existing = db.query(EsportsBet).filter(
-        EsportsBet.user_id  == current_user.id,
+        EsportsBet.user_id == current_user.id,
         EsportsBet.match_id == body.match_id,
         EsportsBet.bet_type == body.bet_type,
-        EsportsBet.status   == "pending",
+        EsportsBet.status == "pending",
     ).first()
     if existing:
-        raise HTTPException(400, "Tu as déjà un pari en cours sur ce type pour ce match")
+        raise HTTPException(400, "Tu as déjà un pari en cours sur ce match")
 
     if current_user.coins < body.amount:
         raise HTTPException(400, "Coins insuffisants")
 
-# Remplace les lignes wr_t1/wr_t2/compute_odds par :
+    # 5. Calcul des cotes dynamiques
     amt_t1, amt_t2 = get_bet_amounts(db, body.match_id)
 
-    # Charger les completed events pour le moteur
+    # Charger les événements terminés pour nourrir le moteur de cotes
     bet_events = []
     lid = COVERED_LEAGUES.get(league_s)
     if lid:
@@ -557,26 +584,39 @@ async def place_esports_bet(
         except Exception:
             pass
 
+    # Utilisation du moteur de cotes
     odds_result = _compute_match_odds(
-        t1_code     = t1.get("code", ""),
-        t2_code     = t2.get("code", ""),
-        league_slug = league_s,
-        events      = bet_events,
-        db          = db,
-        amt_t1      = amt_t1,
-        amt_t2      = amt_t2,
+        t1_code=t1.get("code", ""),
+        t2_code=t2.get("code", ""),
+        league_slug=league_s,
+        events=bet_events,
+        db=db,
+        amt_t1=amt_t1,
+        amt_t2=amt_t2,
     )
 
+    # 6. Calcul de la cote finale selon le type de pari
     if body.bet_type == "match_winner":
+        if body.bet_value not in ("team1", "team2"):
+            raise HTTPException(400, "bet_value invalide pour match_winner")
         odds = odds_result["odds_t1"] if body.bet_value == "team1" else odds_result["odds_t2"]
-    else:
-        parts      = body.bet_value.split("_", 1)
+    
+    elif body.bet_type == "exact_score":
+        parts = body.bet_value.split("_", 1)
+        valid_scores = SCORE_MULTIPLIERS.get(bo, SCORE_MULTIPLIERS[3]).keys()
+        
+        if len(parts) != 2 or parts[0] not in ("team1", "team2") or parts[1] not in valid_scores:
+            raise HTTPException(400, f"bet_value invalide pour exact_score (BO{bo})")
+        
         bet_winner = parts[0]
-        score_key  = parts[1]
-        base_odds  = odds_result["odds_t1"] if bet_winner == "team1" else odds_result["odds_t2"]
+        score_key = parts[1]
+        
+        # Base odds (winner) * Multiplicateur du score
+        base_odds = odds_result["odds_t1"] if bet_winner == "team1" else odds_result["odds_t2"]
         score_mult = SCORE_MULTIPLIERS.get(bo, SCORE_MULTIPLIERS[3]).get(score_key, 1.5)
-        odds       = round(min(8.0, base_odds * score_mult), 2)
+        odds = round(min(15.0, base_odds * score_mult), 2)
 
+    # 7. Création de l'objet Pari
     bet = EsportsBet(
         user_id=current_user.id,
         match_id=body.match_id,
@@ -594,8 +634,11 @@ async def place_esports_bet(
         amount=body.amount,
         odds=odds,
         status="pending",
-        match_start_time=start_time,
+        match_start_time=start_time, # Variable maintenant définie
     )
+
+    # Déduction des coins et enregistrement de la transaction
+    current_user.coins -= body.amount
     db.add(bet)
     db.add(Transaction(
         user_id=current_user.id,
@@ -603,16 +646,17 @@ async def place_esports_bet(
         amount=-body.amount,
         description=f"Esports — {t1.get('code')} vs {t2.get('code')} ({league.get('name', '')})",
     ))
+    
     db.commit()
     db.refresh(bet)
 
     return {
-        "bet_id":         bet.id,
-        "amount":         body.amount,
-        "odds":           odds,
+        "status": "success",
+        "bet_id": bet.id,
+        "amount": bet.amount,
+        "odds": bet.odds,
         "coins_restants": current_user.coins,
     }
-
 
 @router.get("/bets/my-bets")
 def get_my_esports_bets(
