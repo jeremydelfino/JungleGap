@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import './Register.css'
 import api from '../../api/client'
@@ -15,7 +15,7 @@ const REGIONS = [
   { id: 'OCE',  flag: '🇦🇺' },
 ]
 
-const STEPS = ['Compte', 'Riot ID', 'Vérifier']
+const STEPS = ['Compte', 'Riot ID', 'Vérifier', 'Email']
 
 function Stepper({ current }) {
   return (
@@ -40,6 +40,129 @@ function getStrength(p) {
   return { label: 'Fort', c: 's', pct: 100 }
 }
 
+// ─── Step 4 : saisie du code email ──────────────────────────
+function EmailCodeStep({ email, onSuccess }) {
+  const [digits, setDigits]     = useState(['', '', '', '', '', ''])
+  const [error, setError]       = useState('')
+  const [verifying, setVerify]  = useState(false)
+  const [resending, setResend]  = useState(false)
+  const [resent, setResent]     = useState(false)
+  const [countdown, setCountdown] = useState(0)
+  const refs = useRef([])
+
+  // Countdown renvoi
+  useEffect(() => {
+    if (countdown <= 0) return
+    const t = setTimeout(() => setCountdown(c => c - 1), 1000)
+    return () => clearTimeout(t)
+  }, [countdown])
+
+  const handleDigit = (i, val) => {
+    if (!/^\d?$/.test(val)) return
+    const next = [...digits]
+    next[i] = val
+    setDigits(next)
+    setError('')
+    if (val && i < 5) refs.current[i + 1]?.focus()
+  }
+
+  const handleKeyDown = (i, e) => {
+    if (e.key === 'Backspace' && !digits[i] && i > 0) {
+      refs.current[i - 1]?.focus()
+    }
+  }
+
+  const handlePaste = (e) => {
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
+    if (pasted.length === 6) {
+      setDigits(pasted.split(''))
+      refs.current[5]?.focus()
+    }
+  }
+
+  const verify = async () => {
+    const code = digits.join('')
+    if (code.length < 6) return setError('Entre les 6 chiffres du code')
+    setVerify(true); setError('')
+    try {
+      const { data } = await api.post('/auth/register/verify-email', { email, code })
+      onSuccess(data)
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Code incorrect')
+      setDigits(['', '', '', '', '', ''])
+      refs.current[0]?.focus()
+    } finally { setVerify(false) }
+  }
+
+  const resend = async () => {
+    if (countdown > 0) return
+    setResend(true); setError('')
+    try {
+      await api.post('/auth/register/resend-code', { email })
+      setResent(true)
+      setCountdown(60)
+      setTimeout(() => setResent(false), 3000)
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Erreur lors du renvoi')
+    } finally { setResend(false) }
+  }
+
+  return (
+    <>
+      <h1 className="auth-title">Vérifie ton email</h1>
+      <p className="auth-sub">
+        On a envoyé un code à <strong style={{ color: '#e8eaf0' }}>{email}</strong>
+      </p>
+
+      {/* Input 6 chiffres */}
+      <div className="email-code-wrap" onPaste={handlePaste}>
+        {digits.map((d, i) => (
+          <input
+            key={i}
+            ref={el => refs.current[i] = el}
+            className={`email-code-input ${error ? 'err' : ''}`}
+            type="text"
+            inputMode="numeric"
+            maxLength={1}
+            value={d}
+            onChange={e => handleDigit(i, e.target.value)}
+            onKeyDown={e => handleKeyDown(i, e)}
+            autoFocus={i === 0}
+          />
+        ))}
+      </div>
+
+      {error && <p className="auth-error" style={{ marginTop: 12 }}>{error}</p>}
+      {resent && <p style={{ color: '#65BD62', fontSize: 13, textAlign: 'center', marginTop: 8, fontFamily: 'Inter, sans-serif' }}>✓ Code renvoyé !</p>}
+
+      <button
+        className="auth-btn btn-green"
+        onClick={verify}
+        disabled={verifying || digits.join('').length < 6}
+        style={{ marginTop: 20 }}
+      >
+        {verifying
+          ? <><span className="auth-spinner" /><span>Vérification…</span></>
+          : <><span>Confirmer</span><span className="btn-shimmer" /></>
+        }
+      </button>
+
+      <p className="auth-footer" style={{ marginTop: 16 }}>
+        Tu n'as pas reçu le code ?{' '}
+        <button
+          onClick={resend}
+          disabled={resending || countdown > 0}
+          style={{ background: 'none', border: 'none', padding: 0, cursor: countdown > 0 ? 'default' : 'pointer', fontFamily: 'inherit' }}
+          className="auth-link"
+        >
+          {countdown > 0 ? `Renvoyer (${countdown}s)` : 'Renvoyer'}
+        </button>
+      </p>
+    </>
+  )
+}
+
+// ─── Composant principal ─────────────────────────────────────
 export default function Register() {
   const navigate = useNavigate()
   const { login } = useAuthStore()
@@ -54,15 +177,33 @@ export default function Register() {
 
   const [region, setRegion] = useState('')
   const [riotId, setRiotId] = useState('')
-
-  const [riotData, setRiotData]   = useState(null)
+  const [riotData, setRiotData] = useState(null)
   const [verifying, setVerifying] = useState(false)
+
+  // Email enregistré après register/complete ou register
+  const [pendingEmail, setPendingEmail] = useState('')
 
   const go0 = e => {
     e.preventDefault(); setError('')
     if (acc.password !== acc.confirm) return setError('Les mots de passe ne correspondent pas')
     if (acc.password.length < 8) return setError('Minimum 8 caractères')
     setStep(1)
+  }
+
+  const skipRiot = async () => {
+    setError(''); setLoading(true)
+    try {
+      const { data } = await api.post('/auth/register', {
+        username: acc.username,
+        email:    acc.email,
+        password: acc.password,
+      })
+      console.log('skipRiot response:', data)  // ← ajoute ça
+      setPendingEmail(data.email)
+      setStep(3)
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Erreur lors de la création du compte')
+    } finally { setLoading(false) }
   }
 
   const go1 = async e => {
@@ -90,11 +231,16 @@ export default function Register() {
         game_name: riotData.game_name, tag_line: riotData.tag_line,
         region, expected_icon_id: riotData.icon_id,
       })
-      login({ username: data.username, coins: data.coins }, data.token)
-      navigate('/')
+      setPendingEmail(data.email)
+      setStep(3)
     } catch (err) {
       setError(err.response?.data?.detail || 'Mauvaise icône, réessaie')
     } finally { setVerifying(false) }
+  }
+
+  const handleEmailVerified = (data) => {
+    login({ username: data.username, coins: data.coins }, data.token)
+    navigate('/')
   }
 
   return (
@@ -118,7 +264,7 @@ export default function Register() {
         {/* ── STEP 0 : Compte ── */}
         {step === 0 && <>
           <h1 className="auth-title">Créer un compte</h1>
-          <p className="auth-sub">3 étapes, c'est rapide.</p>
+          <p className="auth-sub">4 étapes, c'est rapide.</p>
 
           <div className="auth-bonus">
             <div className="bonus-dot" />
@@ -213,9 +359,21 @@ export default function Register() {
               </button>
             </div>
           </form>
+
+          <p className="auth-footer" style={{ marginTop: 16 }}>
+            Pas accès à LoL pour l'instant ?{' '}
+            <button
+              onClick={skipRiot}
+              disabled={loading}
+              style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}
+              className="auth-link"
+            >
+              Passer cette étape
+            </button>
+          </p>
         </>}
 
-        {/* ── STEP 2 : Vérification icône ── */}
+        {/* ── STEP 2 : Vérification icône Riot ── */}
         {step === 2 && riotData && <>
           <h1 className="auth-title">Vérification</h1>
           <p className="auth-sub">Équipe cette icône dans LoL puis reviens ici.</p>
@@ -261,6 +419,14 @@ export default function Register() {
             </button>
           </div>
         </>}
+
+        {/* ── STEP 3 : Email ── */}
+        {step === 3 && (
+          <EmailCodeStep
+            email={pendingEmail || acc.email}
+            onSuccess={handleEmailVerified}
+          />
+        )}
       </div>
     </div>
   )

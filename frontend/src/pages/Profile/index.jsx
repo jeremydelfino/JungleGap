@@ -280,7 +280,15 @@ export default function Profile() {
   const accentColor   = favTeam?.color || '#65BD62'
   const lolIconUrl    = primaryAcc?.profile_icon_url || null
   const avatarSrc     = profile?.avatar_url || lolIconUrl
-  const stats         = computeStats(bets)
+  const stats = isOwnProfile
+  ? computeStats(bets)
+  : {
+      gained:  profile?.bet_stats?.total_won     ?? 0,
+      spent:   profile?.bet_stats?.total_wagered ?? 0,
+      winrate: profile?.bet_stats?.winrate       ?? null,
+      streak:  profile?.bet_stats?.streak        ?? 0,
+      total:   profile?.bet_stats?.total         ?? 0,
+    }
   const canAddMore    = isOwnProfile && riotAccounts.length < 3
 
   return (
@@ -371,19 +379,27 @@ export default function Profile() {
             <div className="profile-card-label">Statistiques</div>
             <div className="profile-stats-grid">
               <div className="profile-stat">
-                <div className="profile-stat-val green">{isOwnProfile ? (stats.gained > 0 ? `+${stats.gained.toLocaleString()}` : '0') : '—'}</div>
+                <div className="profile-stat-val green">
+                  {stats.gained > 0 ? `+${stats.gained.toLocaleString()}` : '0'}
+                </div>
                 <div className="profile-stat-lbl">Coins gagnés</div>
               </div>
               <div className="profile-stat">
-                <div className="profile-stat-val red">{isOwnProfile ? (stats.spent > 0 ? `-${stats.spent.toLocaleString()}` : '0') : '—'}</div>
+                <div className="profile-stat-val red">
+                  {stats.spent > 0 ? `-${stats.spent.toLocaleString()}` : '0'}
+                </div>
                 <div className="profile-stat-lbl">Coins perdus</div>
               </div>
               <div className="profile-stat">
-                <div className="profile-stat-val accent">{isOwnProfile ? (stats.winrate !== null ? `${stats.winrate}%` : '—') : '—'}</div>
+                <div className="profile-stat-val accent">
+                  {stats.winrate !== null ? `${stats.winrate}%` : '—'}
+                </div>
                 <div className="profile-stat-lbl">Win rate</div>
               </div>
               <div className="profile-stat">
-                <div className="profile-stat-val gold">{isOwnProfile ? (stats.streak > 0 ? `🔥 ${stats.streak}` : '0') : '—'}</div>
+                <div className="profile-stat-val gold">
+                  {stats.streak > 0 ? `🔥 ${stats.streak}` : '0'}
+                </div>
                 <div className="profile-stat-lbl">Streak actuel</div>
               </div>
             </div>

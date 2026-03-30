@@ -1,1 +1,50 @@
 @import '../Login/Login.css';
+
+/* ─── EMAIL CODE INPUT ─── */
+
+/* ─── STEPPER 4 étapes ─── */
+.reg-si:last-child { flex: 0; min-width: fit-content; }
+.reg-label { font-size: 10px; }
+
+.email-code-wrap {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin: 24px 0 0;
+  }
+  
+  .email-code-input {
+    width: 46px;
+    height: 56px;
+    background: #1c1c1c;
+    border: 1px solid #ffffff0d;
+    border-radius: 12px;
+    text-align: center;
+    font-family: 'Outfit', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: #e8eaf0;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+    caret-color: #65BD62;
+  }
+  
+  .email-code-input:focus {
+    border-color: #65bd6240;
+    background: #202020;
+    box-shadow: 0 0 0 3px #65bd6215;
+  }
+  
+  .email-code-input.err {
+    border-color: #f8717140;
+    box-shadow: 0 0 0 3px #f8717115;
+    animation: shake 0.35s ease;
+  }
+  
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    20%      { transform: translateX(-6px); }
+    40%      { transform: translateX(6px); }
+    60%      { transform: translateX(-4px); }
+    80%      { transform: translateX(4px); }
+  }

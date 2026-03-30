@@ -23,6 +23,11 @@ class User(Base):
     favorite_team_color     = Column(String(20), nullable=True)
     created_at              = Column(TIMESTAMP, server_default=func.now())
 
+    # ─── Email verification ───────────────────────────────────
+    email_verified         = Column(Boolean, default=False, nullable=False)
+    email_code             = Column(String(6), nullable=True)
+    email_code_expires_at  = Column(TIMESTAMP, nullable=True)
+
     riot_accounts = relationship(
         "RiotAccount",
         foreign_keys="RiotAccount.user_id",
