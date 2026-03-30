@@ -194,3 +194,20 @@ def delete_card(card_id: int, db: Session = Depends(get_db)):
     db.delete(card)
     db.commit()
     return {"success": True, "deleted": card.name}
+
+
+# **Pour débugger tes paris actuellement bloqués :**
+
+# 1. **Voir quels paris sont pending** :
+# ```
+# GET http://localhost:8000/esports/bets/pending-debug
+# ```
+
+# 2. **Forcer la résolution globale** :
+# ```
+# POST http://localhost:8000/esports/bets/resolve-pending
+# ```
+
+# 3. **Si un match spécifique ne se résout pas**, récupère son `match_id` dans l'étape 1, puis :
+# ```
+# POST http://localhost:8000/esports/bets/resolve-match/{match_id}

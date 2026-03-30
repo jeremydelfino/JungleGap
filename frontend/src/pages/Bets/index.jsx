@@ -11,7 +11,6 @@ const STATUS_CONFIG = {
   pending:   { label: 'En cours', color: '#f59e0b', bg: '#f59e0b12', icon: '⏳' },
   won:       { label: 'Gagné',    color: '#65BD62', bg: '#65BD6212', icon: '✓'  },
   lost:      { label: 'Perdu',    color: '#ef4444', bg: '#ef444412', icon: '✗'  },
-  cancelled: { label: 'Annulé',   color: '#6b7280', bg: '#6b728012', icon: '—'  },
 }
 
 const LEAGUE_META = {
@@ -216,11 +215,6 @@ function EsportsBetRow({ bet, onCancel, i }) {
         </div>
 
         <div className="esbet-actions">
-          {isPending && (
-            <button className="esbet-cancel-btn" onClick={() => onCancel(bet)}>
-              Annuler
-            </button>
-          )}
           <div className="esbet-status-badge" style={{ color: status.color, background: status.bg, borderColor: status.color + '28' }}>
             {status.icon} {status.label}
           </div>
@@ -300,17 +294,6 @@ export default function Bets() {
 
   useEffect(() => { setPage(1) }, [filter, tab])
 
-  const handleCancelEsportsBet = async (betId) => {
-    try {
-      await api.post(`/esports/bets/${betId}/cancel`)
-      setEsportsBets(prev => prev.map(b =>
-        b.id === betId ? { ...b, status: 'cancelled' } : b
-      ))
-      setCancelModal(null)
-    } catch (err) {
-      alert(err.response?.data?.detail || 'Erreur lors de l\'annulation')
-    }
-  }
 
   // ── Stats globales ──────────────────────────────────────────
   const tickets        = groupBetsByGame(bets)

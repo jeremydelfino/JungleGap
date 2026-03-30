@@ -319,9 +319,8 @@ async def get_esports_schedule(
 
     result = []
     for ev in events:
-        if ev.get("type") != "match":
+        if not ev.get("match"):
             continue
-
         match    = ev.get("match", {})
         teams    = match.get("teams", [])
         if len(teams) < 2:
@@ -426,7 +425,7 @@ async def get_esports_live(db: Session = Depends(get_db)):
     events = data.get("data", {}).get("schedule", {}).get("events", [])
     result = []
     for ev in events:
-        if ev.get("type") != "match":
+        if not ev.get("match"):
             continue
         match  = ev.get("match", {})
         teams  = match.get("teams", [])
@@ -699,25 +698,36 @@ def get_my_esports_bets(
 
 
 async def resolve_completed_matches(db: Session):
+    import logging
+    logger = logging.getLogger(__name__)
+
     for slug, lid in COVERED_LEAGUES.items():
         try:
             tid = await lolesports.get_current_tournament_id(lid)
             if not tid:
+                logger.warning(f"[resolve] {slug}: pas de tournament_id, skip")
                 continue
+
+            logger.info(f"[resolve] {slug}: tournament_id={tid}")
             ce     = await lolesports.get_completed_events(tid)
             events = ce.get("data", {}).get("schedule", {}).get("events", [])
-        except Exception:
+            logger.info(f"[resolve] {slug}: {len(events)} completed events")
+
+        except Exception as e:
+            logger.error(f"[resolve] {slug}: erreur API — {e}")
             continue
 
         for ev in events:
-            if ev.get("type") != "match":
+            if not ev.get("match"):
                 continue
+
             match    = ev.get("match", {})
             match_id = match.get("id", "")
             teams    = match.get("teams", [])
             if len(teams) < 2:
                 continue
 
+            # Vérifier s'il y a des paris pending pour ce match
             pending = db.query(EsportsBet).filter(
                 EsportsBet.match_id == match_id,
                 EsportsBet.status   == "pending",
@@ -725,19 +735,39 @@ async def resolve_completed_matches(db: Session):
             if not pending:
                 continue
 
+            logger.info(f"[resolve] match {match_id} a des paris pending — tentative de résolution")
+
             t1, t2  = teams[0], teams[1]
             t1_wins = (t1.get("result") or {}).get("gameWins", 0)
             t2_wins = (t2.get("result") or {}).get("gameWins", 0)
-            if t1_wins == 0 and t2_wins == 0:
-                continue
 
-            winner, score = parse_actual_score(t1_wins, t2_wins)
+            # Fallback : utiliser l'outcome si gameWins = 0-0
+            if t1_wins == 0 and t2_wins == 0:
+                t1_outcome = (t1.get("result") or {}).get("outcome", "")
+                t2_outcome = (t2.get("result") or {}).get("outcome", "")
+                logger.warning(f"[resolve] match {match_id}: gameWins=0-0, outcomes: {t1_outcome}/{t2_outcome}")
+
+                if t1_outcome == "win":
+                    winner = "team1"
+                    score  = "1-0"
+                elif t2_outcome == "win":
+                    winner = "team2"
+                    score  = "1-0"
+                else:
+                    logger.error(f"[resolve] match {match_id}: impossible de déterminer le gagnant, skip")
+                    continue
+            else:
+                winner, score = parse_actual_score(t1_wins, t2_wins)
+
+            logger.info(f"[resolve] match {match_id}: winner={winner}, score={score} — résolution en cours")
+
             db.query(EsportsBet).filter(
                 EsportsBet.match_id == match_id,
                 EsportsBet.status   == "pending",
             ).update({"actual_winner": winner, "actual_score": score})
             db.commit()
             resolve_match(match_id, db)
+            logger.info(f"[resolve] match {match_id}: ✅ résolu")
 
 
 class PlaceEsportsBetSchema(BaseModel):
@@ -1023,3 +1053,180 @@ async def preview_odds(
         db          = db,
     )
     return {"t1": t1_code.upper(), "t2": t2_code.upper(), **result}
+
+# ─── Admin : debug + résolution forcée ───────────────────────
+
+@router.get("/bets/pending-debug")
+async def debug_pending_esports_bets(db: Session = Depends(get_db)):
+    """Liste tous les paris esports encore en pending — pour diagnostiquer."""
+    bets = db.query(EsportsBet).filter(EsportsBet.status == "pending").all()
+    return [
+        {
+            "id":         b.id,
+            "user_id":    b.user_id,
+            "match_id":   b.match_id,
+            "team1_code": b.team1_code,
+            "team2_code": b.team2_code,
+            "bet_value":  b.bet_value,
+            "amount":     b.amount,
+            "created_at": b.created_at,
+        }
+        for b in bets
+    ]
+
+
+@router.post("/bets/resolve-pending")
+async def force_resolve_pending_esports(db: Session = Depends(get_db)):
+    """Force la résolution de tous les paris esports pending. À appeler manuellement si le scheduler rate."""
+    resolved_matches = []
+    errors           = []
+
+    await resolve_completed_matches(db)
+
+    # Vérifier combien de paris restent pending après résolution
+    still_pending = db.query(EsportsBet).filter(EsportsBet.status == "pending").count()
+
+    return {
+        "status":        "done",
+        "still_pending": still_pending,
+    }
+
+
+@router.post("/bets/resolve-match/{match_id}")
+async def force_resolve_match(match_id: str, db: Session = Depends(get_db)):
+    """Force la résolution d'un match spécifique par son match_id Riot."""
+    pending = db.query(EsportsBet).filter(
+        EsportsBet.match_id == match_id,
+        EsportsBet.status   == "pending",
+    ).all()
+
+    if not pending:
+        return {"status": "no_pending", "match_id": match_id}
+
+    # Chercher le résultat dans l'API
+    found = False
+    for slug, lid in COVERED_LEAGUES.items():
+        try:
+            tid = await lolesports.get_current_tournament_id(lid)
+            if not tid:
+                continue
+            ce     = await lolesports.get_completed_events(tid)
+            events = ce.get("data", {}).get("schedule", {}).get("events", [])
+            for ev in events:
+                if not ev.get("match"):
+                    continue
+                m = ev.get("match", {})
+                if m.get("id") != match_id:
+                    continue
+
+                teams  = m.get("teams", [])
+                if len(teams) < 2:
+                    continue
+                t1, t2  = teams[0], teams[1]
+                t1_wins = (t1.get("result") or {}).get("gameWins", 0)
+                t2_wins = (t2.get("result") or {}).get("gameWins", 0)
+
+                if t1_wins == 0 and t2_wins == 0:
+                    t1_out = (t1.get("result") or {}).get("outcome", "")
+                    t2_out = (t2.get("result") or {}).get("outcome", "")
+                    if t1_out == "win":
+                        winner, score = "team1", "1-0"
+                    elif t2_out == "win":
+                        winner, score = "team2", "1-0"
+                    else:
+                        return {"status": "error", "detail": "Impossible de déterminer le gagnant"}
+                else:
+                    winner, score = parse_actual_score(t1_wins, t2_wins)
+
+                db.query(EsportsBet).filter(
+                    EsportsBet.match_id == match_id,
+                    EsportsBet.status   == "pending",
+                ).update({"actual_winner": winner, "actual_score": score})
+                db.commit()
+                resolve_match(match_id, db)
+                found = True
+                return {
+                    "status":  "resolved",
+                    "match_id": match_id,
+                    "winner":  winner,
+                    "score":   score,
+                    "bets_resolved": len(pending),
+                }
+        except Exception as e:
+            errors = str(e)
+            continue
+
+    if not found:
+        return {"status": "not_found_in_completed", "match_id": match_id, "detail": "Match pas trouvé dans les completed events"}
+
+@router.get("/debug/completed-events")
+async def debug_completed_events(db: Session = Depends(get_db)):
+    """Debug : liste tous les match_ids des completed events par ligue."""
+    result = {}
+    target_ids = {
+        "115548668059523652",
+        "115548668059589328", 
+        "115548668059523684",
+        "115548668059523640",
+    }
+    
+    for slug, lid in COVERED_LEAGUES.items():
+        try:
+            tid = await lolesports.get_current_tournament_id(lid)
+            if not tid:
+                result[slug] = {"error": "pas de tournament_id"}
+                continue
+            
+            ce     = await lolesports.get_completed_events(tid)
+            events = ce.get("data", {}).get("schedule", {}).get("events", [])
+            
+            match_events = []
+            for ev in events:
+                if not ev.get("match"):
+                    continue
+                m      = ev.get("match", {})
+                mid    = m.get("id", "")
+                teams  = m.get("teams", [])
+                t1     = teams[0] if len(teams) > 0 else {}
+                t2     = teams[1] if len(teams) > 1 else {}
+                match_events.append({
+                    "match_id": mid,
+                    "found":    mid in target_ids,
+                    "t1_code":  t1.get("code"),
+                    "t2_code":  t2.get("code"),
+                    "t1_wins":  (t1.get("result") or {}).get("gameWins"),
+                    "t2_wins":  (t2.get("result") or {}).get("gameWins"),
+                    "t1_out":   (t1.get("result") or {}).get("outcome"),
+                    "t2_out":   (t2.get("result") or {}).get("outcome"),
+                    "state":    ev.get("state"),
+                })
+            
+            found_targets = [e for e in match_events if e["found"]]
+            result[slug] = {
+                "tournament_id": tid,
+                "total_events":  len(match_events),
+                "target_matches_found": found_targets,
+                "all_match_ids": [e["match_id"] for e in match_events],
+            }
+        except Exception as e:
+            result[slug] = {"error": str(e)}
+    
+    return result
+
+@router.get("/debug/completed-split2")
+async def debug_completed_split2():
+    import httpx
+    tournament_id = "115548668058343983"  # LEC Split 2
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(
+            "https://esports-api.lolesports.com/persisted/gw/getCompletedEvents",
+            headers={"x-api-key": "0TvQnueqKa5mxJntVWt0w4LpLfEkrV1Ta8rQBb9Z"},
+            params={"hl": "fr-FR", "tournamentId": tournament_id},
+        )
+        data   = r.json()
+        events = data.get("data", {}).get("schedule", {}).get("events", [])
+        return {
+            "total": len(events),
+            "types": [ev.get("type") for ev in events],
+            "first_event": events[0] if events else None,
+        }
