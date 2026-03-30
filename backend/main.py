@@ -58,7 +58,6 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "https://jungle-48xszhbs4-jeremydelfinos-projects.vercel.app",
         "https://*.vercel.app",
     ],
     allow_methods=["*"],
