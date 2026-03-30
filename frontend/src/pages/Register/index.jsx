@@ -99,14 +99,23 @@ export default function Register() {
 
   return (
     <div className="auth-page">
+      {/* ─── GLOWS ─── */}
       <div className="auth-glow auth-glow-1" />
       <div className="auth-glow auth-glow-2" />
+      <div className="auth-glow auth-glow-3" />
 
+      {/* ─── IMAGES FLOTTANTES ─── */}
+      <img src="/logo.png"       className="auth-float auth-float-1" alt="" />
+      <img src="/teemo1_png.png" className="auth-float auth-float-2" alt="" />
+      <img src="/teemo2.png"     className="auth-float auth-float-3" alt="" />
+      <img src="/jungle1.webp"   className="auth-float auth-float-4" alt="" />
+
+      {/* ─── CARD ─── */}
       <div className="auth-card" style={{ maxWidth: step === 2 ? 420 : 400 }}>
         <div className="auth-logo" onClick={() => navigate('/')}>junglegap</div>
         <Stepper current={step} />
 
-        {/* ── STEP 0 ── */}
+        {/* ── STEP 0 : Compte ── */}
         {step === 0 && <>
           <h1 className="auth-title">Créer un compte</h1>
           <p className="auth-sub">3 étapes, c'est rapide.</p>
@@ -153,7 +162,7 @@ export default function Register() {
 
             {error && <p className="auth-error" style={{ marginTop: 12 }}>{error}</p>}
 
-            <button className="auth-btn btn-cyan" type="submit" style={{ marginTop: 20 }}>
+            <button className="auth-btn btn-green" type="submit" style={{ marginTop: 20 }}>
               Continuer <span className="btn-shimmer" />
             </button>
           </form>
@@ -163,7 +172,7 @@ export default function Register() {
           </p>
         </>}
 
-        {/* ── STEP 1 ── */}
+        {/* ── STEP 1 : Riot ID ── */}
         {step === 1 && <>
           <h1 className="auth-title">Riot ID</h1>
           <p className="auth-sub">Liaison obligatoire pour parier sur les parties live.</p>
@@ -196,7 +205,7 @@ export default function Register() {
               <button type="button" className="btn-ghost" onClick={() => { setStep(0); setError('') }}>
                 Retour
               </button>
-              <button className="auth-btn btn-cyan" type="submit" disabled={loading}>
+              <button className="auth-btn btn-green" type="submit" disabled={loading}>
                 {loading
                   ? <><span className="auth-spinner" /><span>Vérification…</span></>
                   : <><span>Continuer</span><span className="btn-shimmer" /></>
@@ -206,39 +215,39 @@ export default function Register() {
           </form>
         </>}
 
-        {/* ── STEP 2 ── */}
+        {/* ── STEP 2 : Vérification icône ── */}
         {step === 2 && riotData && <>
           <h1 className="auth-title">Vérification</h1>
           <p className="auth-sub">Équipe cette icône dans LoL puis reviens ici.</p>
 
-          <div className="verify-wrap">
-            <div className="verify-steps">
-              {[
-                { n:1, t:'Ouvre League of Legends', s:'Lance le client' },
-                { n:2, t:'Profil → Icône',          s:'Paramètres invocateur' },
-                { n:3, t:`Équipe l'icône #${riotData.icon_id}`, s:'Puis sauvegarde', cur:true },
-                { n:4, t:'Clique sur Vérifier',     s:'Check en temps réel' },
-              ].map(row => (
-                <div key={row.n} className={`v-row ${row.cur ? 'cur' : ''}`}>
-                  <div className="v-num">{row.n}</div>
-                  <div className="v-txt">
-                    <strong>{row.t}</strong>
-                    <span>{row.s}</span>
-                  </div>
-                </div>
-              ))}
+          <div className="verify-block">
+            <div className="verify-summoner">
+              <div className="verify-icon-wrap">
+                <img src={riotData.icon_url} alt={`icône ${riotData.icon_id}`} />
+              </div>
+              <div className="verify-info">
+                <div className="verify-name">{riotData.game_name}</div>
+                <div className="verify-tag">#{riotData.tag_line}</div>
+              </div>
             </div>
 
-            <div className="verify-icon-col">
-              <img className="v-img" src={riotData.icon_url} alt={`icône ${riotData.icon_id}`} />
-              <span className="v-badge">#{riotData.icon_id}</span>
-              <p className="v-name">
-                {riotData.game_name}<span className="v-tag">#{riotData.tag_line}</span>
+            <div className="verify-divider" />
+
+            <div className="verify-target">
+              <span className="verify-target-label">Équipe cette icône dans LoL</span>
+              <img
+                className="verify-target-icon"
+                src={riotData.icon_url}
+                alt={`icône ${riotData.icon_id}`}
+              />
+              <p className="verify-target-hint">
+                Profil → Icône → sélectionne l'icône <strong>#{riotData.icon_id}</strong><br />
+                Sauvegarde puis clique sur Vérifier
               </p>
             </div>
           </div>
 
-          {error && <p className="auth-error">{error}</p>}
+          {error && <p className="auth-error" style={{ marginTop: 12 }}>{error}</p>}
 
           <div className="reg-nav" style={{ marginTop: 16 }}>
             <button type="button" className="btn-ghost" onClick={() => { setStep(1); setError('') }}>
@@ -251,8 +260,6 @@ export default function Register() {
               }
             </button>
           </div>
-
-          <p className="verify-tip">Sauvegarde l'icône dans LoL avant de cliquer</p>
         </>}
       </div>
     </div>
