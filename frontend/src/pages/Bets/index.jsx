@@ -8,9 +8,10 @@ const DDV      = '14.24.1'
 const PER_PAGE = 8
 
 const STATUS_CONFIG = {
-  pending:   { label: 'En cours', color: '#f59e0b', bg: '#f59e0b12', icon: '⏳' },
-  won:       { label: 'Gagné',    color: '#65BD62', bg: '#65BD6212', icon: '✓'  },
-  lost:      { label: 'Perdu',    color: '#ef4444', bg: '#ef444412', icon: '✗'  },
+  pending:   { label: 'En cours',  color: '#f59e0b', bg: '#f59e0b12', icon: '⏳' },
+  won:       { label: 'Gagné',     color: '#65BD62', bg: '#65BD6212', icon: '✓'  },
+  lost:      { label: 'Perdu',     color: '#ef4444', bg: '#ef444412', icon: '✗'  },
+  cancelled: { label: 'Remboursé', color: '#6b7280', bg: '#6b728012', icon: '↩️'  },
 }
 
 const LEAGUE_META = {
@@ -24,24 +25,32 @@ const LEAGUE_META = {
 }
 
 const BET_TYPE_LABELS = {
-  who_wins:     'Victoire',
-  first_blood:  'First Blood',
-  match_winner: 'Vainqueur',
-  exact_score:  'Score exact',
+  who_wins:              '🏆 Victoire',
+  first_blood:           '🩸 First Blood',
+  first_tower:           '🗼 1ère tour',
+  first_dragon:          '🐉 1er dragon',
+  first_baron:           '👁️ 1er Baron',
+  game_duration_under25: '⚡ < 25 min',
+  game_duration_25_35:   '⏱️ 25–35 min',
+  game_duration_over35:  '🐢 > 35 min',
+  player_positive_kda:   '📊 KDA positif',
+  champion_kda_over25:   '⚔️ KDA > 2.5',
+  champion_kda_over5:    '🔥 KDA > 5',
+  champion_kda_over10:   '💀 KDA > 10',
+  top_damage:            '💥 Top dégâts',
+  jungle_gap:            '🌿 Jungle Gap',
+  match_winner:          '🏆 Vainqueur',
+  exact_score:           '🎯 Score exact',
 }
 
 const QUEUE_NAMES = {
-  '420': 'Ranked Solo',
-  '440': 'Ranked Flex',
-  '400': 'Normal',
-  '450': 'ARAM',
+  '420': 'Ranked Solo', '440': 'Ranked Flex', '400': 'Normal', '450': 'ARAM',
 }
 
 function timeAgo(dateStr) {
   if (!dateStr) return ''
   const diff = Date.now() - new Date(dateStr).getTime()
-  const h    = Math.floor(diff / 3600000)
-  const m    = Math.floor(diff / 60000)
+  const h = Math.floor(diff / 3600000), m = Math.floor(diff / 60000)
   if (h > 24) return `il y a ${Math.floor(h / 24)}j`
   if (h > 0)  return `il y a ${h}h`
   if (m > 0)  return `il y a ${m}m`
@@ -50,9 +59,7 @@ function timeAgo(dateStr) {
 
 function formatDate(dateStr) {
   if (!dateStr) return ''
-  return new Date(dateStr).toLocaleDateString('fr-FR', {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-  })
+  return new Date(dateStr).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 }
 
 function champIcon(name) {
@@ -60,6 +67,16 @@ function champIcon(name) {
   return `https://ddragon.leagueoflegends.com/cdn/${DDV}/img/champion/${name}.png`
 }
 
+function betValueLabel(betType, betValue) {
+  if (!betValue) return '—'
+  if (betValue === 'blue') return '🟦 Blue side'
+  if (betValue === 'red')  return '🟥 Red side'
+  if (betValue === 'none') return '⚖️ Aucun gap'
+  if (betValue === 'confirmed') return '✓'
+  return betValue
+}
+
+// ─── groupBetsByGame ─────────────────────────────────────────
 function groupBetsByGame(bets) {
   const groups = {}
   for (const bet of bets) {
@@ -69,14 +86,19 @@ function groupBetsByGame(bets) {
   }
   return Object.values(groups)
     .map(group => {
-      const statuses    = group.map(b => b.status)
-      let globalStatus  = 'pending'
-      if (statuses.every(s => s === 'won'))         globalStatus = 'won'
-      else if (statuses.some(s => s === 'lost'))    globalStatus = 'lost'
+      const statuses = group.map(b => b.status)
+      let globalStatus = 'pending'
+      if (statuses.every(s => s === 'won'))       globalStatus = 'won'
+      else if (statuses.every(s => s === 'cancelled')) globalStatus = 'cancelled'
+      else if (statuses.some(s => s === 'lost'))   globalStatus = 'lost'
       else if (statuses.some(s => s === 'pending')) globalStatus = 'pending'
+      else if (statuses.some(s => s === 'cancelled')) globalStatus = 'cancelled'
       else globalStatus = 'cancelled'
+
       const totalAmount = group.reduce((acc, b) => acc + b.amount, 0)
       const totalPayout = group.reduce((acc, b) => acc + (b.payout || 0), 0)
+      const combinedOdds = group.reduce((acc, b) => acc * (b.odds || 2), 1)
+
       return {
         key:          group[0].live_game_id ?? `solo_${group[0].id}`,
         live_game_id: group[0].live_game_id,
@@ -86,7 +108,7 @@ function groupBetsByGame(bets) {
         globalStatus,
         totalAmount,
         totalPayout,
-        odds:         Math.pow(2, group.length),
+        combinedOdds,
         created_at:   group[0].created_at,
       }
     })
@@ -105,8 +127,7 @@ function resolveGameCtx(ticket) {
       borderColor: pro.accent_color || '#65BD62',
     }
   }
-  const firstBet  = ticket.bets[0]
-  const betPlayer = firstBet?.game?.bet_player
+  const betPlayer = ticket.bets[0]?.game?.bet_player
   const sumName   = betPlayer?.summoner_name || null
   return {
     type: 'casual', name: sumName || 'Joueur inconnu',
@@ -122,7 +143,6 @@ function parseBetLabel(bet_value, team1_code, team2_code) {
   if (!bet_value) return '—'
   if (bet_value === 'team1') return team1_code
   if (bet_value === 'team2') return team2_code
-  // exact_score : "team1_2-0"
   const parts = bet_value.split('_')
   if (parts.length === 2) {
     const winner = parts[0] === 'team1' ? team1_code : team2_code
@@ -133,52 +153,35 @@ function parseBetLabel(bet_value, team1_code, team2_code) {
   return bet_value
 }
 
-// ─── Ticket Esports ──────────────────────────────────────────
+// ─── EsportsBetRow ────────────────────────────────────────────
 function EsportsBetRow({ bet, onCancel, i }) {
-  const status  = STATUS_CONFIG[bet.status] || STATUS_CONFIG.pending
-  const lm      = LEAGUE_META[bet.league_slug?.toLowerCase()] || {}
-  const lc      = lm.color || '#65BD62'
+  const status    = STATUS_CONFIG[bet.status] || STATUS_CONFIG.pending
+  const lm        = LEAGUE_META[bet.league_slug?.toLowerCase()] || {}
+  const lc        = lm.color || '#65BD62'
   const isPending = bet.status === 'pending'
-
-  const betLabel = parseBetLabel(bet.bet_value, bet.team1_code, bet.team2_code)
-  const betType  = BET_TYPE_LABELS[bet.bet_type] || bet.bet_type
+  const betLabel  = parseBetLabel(bet.bet_value, bet.team1_code, bet.team2_code)
+  const betType   = BET_TYPE_LABELS[bet.bet_type] || bet.bet_type
 
   return (
     <div className="esbet-row" style={{ animationDelay: `${i * 0.04}s` }}>
       <div className="esbet-bar" style={{ background: status.color }} />
-
-      {/* ── Contexte match ── */}
       <div className="esbet-ctx">
         <div className="esbet-league" style={{ color: lc }}>
           <span className="esbet-league-dot" style={{ background: lc }} />
           {bet.league_name || lm.label || bet.league_slug?.toUpperCase()}
         </div>
         <div className="esbet-teams">
-          <img
-            src={bet.team1_image} alt={bet.team1_code}
-            className="esbet-team-logo"
-            referrerPolicy="no-referrer"
-            onError={e => { e.target.style.display = 'none' }}
-          />
+          <img src={bet.team1_image} alt={bet.team1_code} className="esbet-team-logo" referrerPolicy="no-referrer" onError={e => { e.target.style.display = 'none' }} />
           <span className="esbet-team-code">{bet.team1_code}</span>
           <span className="esbet-vs">vs</span>
           <span className="esbet-team-code">{bet.team2_code}</span>
-          <img
-            src={bet.team2_image} alt={bet.team2_code}
-            className="esbet-team-logo"
-            referrerPolicy="no-referrer"
-            onError={e => { e.target.style.display = 'none' }}
-          />
+          <img src={bet.team2_image} alt={bet.team2_code} className="esbet-team-logo" referrerPolicy="no-referrer" onError={e => { e.target.style.display = 'none' }} />
         </div>
         <div className="esbet-meta">
           <span className="esbet-bo">BO{bet.bo_format}</span>
-          {bet.match_start_time && (
-            <span className="esbet-date">{formatDate(bet.match_start_time)}</span>
-          )}
+          {bet.match_start_time && <span className="esbet-date">{formatDate(bet.match_start_time)}</span>}
         </div>
       </div>
-
-      {/* ── Sélection ── */}
       <div className="esbet-body">
         <div className="esbet-sel-type">{betType}</div>
         <div className="esbet-sel-value" style={{ color: lc }}>{betLabel}</div>
@@ -187,8 +190,6 @@ function EsportsBetRow({ bet, onCancel, i }) {
           <span className="esbet-odds-val">×{bet.odds?.toFixed(2)}</span>
         </div>
       </div>
-
-      {/* ── Finances + actions ── */}
       <div className="esbet-right">
         <div className="esbet-finances">
           <div className="esbet-fin-row">
@@ -196,25 +197,21 @@ function EsportsBetRow({ bet, onCancel, i }) {
             <span className="esbet-fin-val">{bet.amount?.toLocaleString()} <span className="esbet-coin">coins</span></span>
           </div>
           <div className="esbet-fin-row">
-            <span className="esbet-fin-lbl">
-              {bet.status === 'won' ? 'Gagné' : bet.status === 'lost' ? 'Perdu' : 'Potentiel'}
-            </span>
-            <span className="esbet-fin-val" style={{
-              color: bet.status === 'won'  ? '#65BD62'
-                   : bet.status === 'lost' ? '#ef4444'
-                   : '#6b7280'
-            }}>
+            <span className="esbet-fin-lbl">{bet.status === 'won' ? 'Gagné' : bet.status === 'cancelled' ? 'Remboursé' : 'Potentiel'}</span>
+            <span className="esbet-fin-val" style={{ color: bet.status === 'won' ? '#65BD62' : bet.status === 'cancelled' ? '#6b7280' : '#6b7280' }}>
               {bet.status === 'won'
                 ? `+${bet.payout?.toLocaleString()}`
-                : bet.status === 'lost'
-                  ? `-${bet.amount?.toLocaleString()}`
-                  : `~${Math.floor((bet.amount || 0) * (bet.odds || 1)).toLocaleString()}`
+                : bet.status === 'cancelled'
+                  ? `+${bet.amount?.toLocaleString()}`
+                  : `~${Math.floor((bet.amount || 0) * (bet.odds || 2))?.toLocaleString()}`
               } <span className="esbet-coin">coins</span>
             </span>
           </div>
         </div>
-
         <div className="esbet-actions">
+          {isPending && (
+            <button className="esbet-cancel-btn" onClick={() => onCancel(bet)}>Annuler</button>
+          )}
           <div className="esbet-status-badge" style={{ color: status.color, background: status.bg, borderColor: status.color + '28' }}>
             {status.icon} {status.label}
           </div>
@@ -224,43 +221,34 @@ function EsportsBetRow({ bet, onCancel, i }) {
   )
 }
 
-// ─── Modale confirmation annulation ──────────────────────────
+// ─── CancelModal ──────────────────────────────────────────────
 function CancelModal({ bet, onConfirm, onClose }) {
   const [loading, setLoading] = useState(false)
-  const lm = LEAGUE_META[bet.league_slug?.toLowerCase()] || {}
-  const lc = lm.color || '#65BD62'
-
-  const handleConfirm = async () => {
-    setLoading(true)
-    await onConfirm(bet.id)
-    setLoading(false)
-  }
+  const lc = LEAGUE_META[bet.league_slug?.toLowerCase()]?.color || '#65BD62'
 
   return (
     <div className="cancel-overlay" onClick={onClose}>
       <div className="cancel-modal" onClick={e => e.stopPropagation()}>
-        <div className="cancel-modal-icon">⚠️</div>
+        <div className="cancel-modal-icon">🗑️</div>
         <div className="cancel-modal-title">Annuler ce pari ?</div>
         <div className="cancel-modal-sub">Tu seras remboursé intégralement.</div>
-
-        <div className="cancel-modal-recap" style={{ borderColor: lc + '25', background: lc + '08' }}>
+        <div className="cancel-modal-recap" style={{ borderColor: lc + '30', background: lc + '08' }}>
           <div className="cancel-recap-teams">
-            <img src={bet.team1_image} alt={bet.team1_code} referrerPolicy="no-referrer" onError={e => { e.target.style.display = 'none' }} />
+            <img src={bet.team1_image} alt="" onError={e => { e.target.style.display = 'none' }} />
             <span className="cancel-recap-code">{bet.team1_code}</span>
             <span className="cancel-recap-vs">vs</span>
             <span className="cancel-recap-code">{bet.team2_code}</span>
-            <img src={bet.team2_image} alt={bet.team2_code} referrerPolicy="no-referrer" onError={e => { e.target.style.display = 'none' }} />
+            <img src={bet.team2_image} alt="" onError={e => { e.target.style.display = 'none' }} />
           </div>
           <div className="cancel-recap-amount">
-            <span className="cancel-recap-lbl">Remboursement</span>
-            <span className="cancel-recap-val" style={{ color: '#65BD62' }}>+{bet.amount?.toLocaleString()} coins</span>
+            <span className="cancel-recap-lbl">Mise à rembourser</span>
+            <span className="cancel-recap-val" style={{ color: lc }}>{bet.amount?.toLocaleString()} coins</span>
           </div>
         </div>
-
         <div className="cancel-modal-btns">
-          <button className="cancel-btn-secondary" onClick={onClose}>Garder le pari</button>
-          <button className="cancel-btn-primary" onClick={handleConfirm} disabled={loading}>
-            {loading ? <span className="cancel-spinner" /> : 'Confirmer l\'annulation'}
+          <button className="cancel-btn-secondary" onClick={onClose}>Garder</button>
+          <button className="cancel-btn-primary" onClick={async () => { setLoading(true); await onConfirm(bet); setLoading(false) }} disabled={loading}>
+            {loading ? <span className="cancel-spinner" /> : "Confirmer l'annulation"}
           </button>
         </div>
       </div>
@@ -273,147 +261,131 @@ export default function Bets() {
   const navigate = useNavigate()
   const { user } = useAuthStore()
 
-  const [bets,         setBets]         = useState([])
-  const [esportsBets,  setEsportsBets]  = useState([])
-  const [loading,      setLoading]      = useState(true)
-  const [filter,       setFilter]       = useState('all')
-  const [tab,          setTab]          = useState('esports') // 'esports' | 'games'
-  const [page,         setPage]         = useState(1)
-  const [cancelModal,  setCancelModal]  = useState(null)
+  const [bets,        setBets]        = useState([])
+  const [esportsBets, setEsportsBets] = useState([])
+  const [loading,     setLoading]     = useState(true)
+  const [filter,      setFilter]      = useState('all')
+  const [tab,         setTab]         = useState('esports')
+  const [page,        setPage]        = useState(1)
+  const [cancelModal, setCancelModal] = useState(null)
 
   useEffect(() => {
     if (!user) { navigate('/login'); return }
-    Promise.all([
-      api.get('/bets/my-bets'),
-      api.get('/esports/bets/my-bets'),
-    ]).then(([r1, r2]) => {
-      setBets(r1.data)
-      setEsportsBets(r2.data)
-    }).catch(() => {}).finally(() => setLoading(false))
+    Promise.all([api.get('/bets/my-bets'), api.get('/esports/bets/my-bets')])
+      .then(([r1, r2]) => { setBets(r1.data); setEsportsBets(r2.data) })
+      .catch(() => {}).finally(() => setLoading(false))
   }, [user])
 
   useEffect(() => { setPage(1) }, [filter, tab])
 
+  const tickets = groupBetsByGame(bets)
 
-  // ── Stats globales ──────────────────────────────────────────
-  const tickets        = groupBetsByGame(bets)
-  const filteredGame   = filter === 'all' ? tickets : tickets.filter(t => t.globalStatus === filter)
-  const filteredEsport = filter === 'all' ? esportsBets : esportsBets.filter(b => b.status === filter)
-
-  const allWon     = [...tickets.filter(t => t.globalStatus === 'won'), ...esportsBets.filter(b => b.status === 'won')]
-  const allLost    = [...tickets.filter(t => t.globalStatus === 'lost'), ...esportsBets.filter(b => b.status === 'lost')]
+  // Stats
+  const allWon     = [...tickets.filter(t => t.globalStatus === 'won'),     ...esportsBets.filter(b => b.status === 'won')]
+  const allLost    = [...tickets.filter(t => t.globalStatus === 'lost'),    ...esportsBets.filter(b => b.status === 'lost')]
   const allPending = [...tickets.filter(t => t.globalStatus === 'pending'), ...esportsBets.filter(b => b.status === 'pending')]
+  const allCancelled = [...tickets.filter(t => t.globalStatus === 'cancelled'), ...esportsBets.filter(b => b.status === 'cancelled')]
   const totalGains = allWon.reduce((acc, b) => acc + (b.totalPayout || b.payout || 0), 0)
   const resolved   = allWon.length + allLost.length
   const winrate    = resolved > 0 ? Math.round((allWon.length / resolved) * 100) : 0
 
-  const stats = {
-    total:   tickets.length + esportsBets.length,
-    pending: allPending.length,
-    won:     allWon.length,
-    lost:    allLost.length,
-    gains:   totalGains,
-    winrate,
-  }
-
-  // ── Pagination ──────────────────────────────────────────────
-  const currentList  = tab === 'esports' ? filteredEsport : filteredGame
-  const totalPages   = Math.ceil(currentList.length / PER_PAGE)
-  const paginated    = currentList.slice((page - 1) * PER_PAGE, page * PER_PAGE)
+  // Filtres
+  const filteredGame   = filter === 'all' ? tickets   : tickets.filter(t => t.globalStatus === filter)
+  const filteredEsport = filter === 'all' ? esportsBets : esportsBets.filter(b => b.status === filter)
+  const currentList    = tab === 'esports' ? filteredEsport : filteredGame
+  const totalPages     = Math.ceil(currentList.length / PER_PAGE)
+  const paginated      = currentList.slice((page - 1) * PER_PAGE, page * PER_PAGE)
 
   const getVisiblePages = () => {
     const pages = []
-    const start = Math.max(1, page - 1)
-    const end   = Math.min(totalPages, page + 1)
-    for (let i = start; i <= end; i++) pages.push(i)
+    for (let p = Math.max(1, page - 1); p <= Math.min(totalPages, page + 1); p++) pages.push(p)
     return pages
+  }
+
+  const handleCancelEsportsBet = async (bet) => {
+    try {
+      await api.post(`/esports/bets/${bet.id}/cancel`)
+      const r = await api.get('/esports/bets/my-bets')
+      setEsportsBets(r.data)
+      setCancelModal(null)
+    } catch (e) {
+      alert(e.response?.data?.detail || 'Erreur lors de l\'annulation')
+    }
   }
 
   return (
     <div className="bets-page">
-
-      {/* ── HEADER ── */}
       <div className="bets-header">
         <div className="bets-header-inner">
           <div>
-            <div className="bets-eyebrow">Jungle Gap</div>
-            <div className="bets-title">Mes paris</div>
-            <div className="bets-sub">Historique de tous tes tickets</div>
+            <div className="bets-eyebrow">MES PARIS</div>
+            <div className="bets-title">Historique</div>
+            <div className="bets-sub">{tickets.length + esportsBets.length} tickets au total</div>
           </div>
-          <div className="bets-balance">
-            <span className="bets-balance-dot" />
-            <span className="bets-balance-val">{user?.coins?.toLocaleString()}</span>
-            <span className="bets-balance-lbl">coins</span>
-          </div>
+          {user && (
+            <div className="bets-balance">
+              <div className="bets-balance-dot" />
+              <div>
+                <div className="bets-balance-val">{user.coins?.toLocaleString()}</div>
+                <div className="bets-balance-lbl">coins</div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="bets-content">
 
-        {/* ── STATS ── */}
+        {/* Stats */}
         <div className="bets-stats">
           {[
-            { val: stats.total,                       label: 'Total',    color: '#e8eaf0' },
-            { val: stats.pending,                     label: 'En cours', color: '#f59e0b' },
-            { val: stats.won,                         label: 'Gagnés',   color: '#65BD62' },
-            { val: stats.lost,                        label: 'Perdus',   color: '#ef4444' },
-            { val: `+${stats.gains.toLocaleString()}`, label: 'Gains',   color: '#e2b147' },
-            { val: `${stats.winrate}%`,               label: 'Win rate', color: '#65BD62' },
-          ].map((s, i) => (
-            <div className="bets-stat-card" key={i}>
+            { label: 'Total',      val: tickets.length + esportsBets.length, color: '#6b7280' },
+            { label: 'En cours',   val: allPending.length,   color: '#f59e0b' },
+            { label: 'Gagnés',     val: allWon.length,       color: '#65BD62' },
+            { label: 'Perdus',     val: allLost.length,      color: '#ef4444' },
+            { label: 'Remboursés', val: allCancelled.length, color: '#6b7280' },
+            { label: 'Winrate',    val: `${winrate}%`,       color: winrate >= 50 ? '#65BD62' : '#ef4444' },
+          ].map(s => (
+            <div key={s.label} className="bets-stat-card">
               <div className="bst-val" style={{ color: s.color }}>{s.val}</div>
               <div className="bst-label">{s.label}</div>
             </div>
           ))}
         </div>
 
-        {/* ── TABS ── */}
+        {/* Tabs */}
         <div className="bets-tabs">
-          <button
-            className={`bets-tab ${tab === 'esports' ? 'active' : ''}`}
-            onClick={() => setTab('esports')}
-          >
-            <span className="bets-tab-icon">🏆</span>
-            Paris officiels
+          <button className={`bets-tab ${tab === 'esports' ? 'active' : ''}`} onClick={() => setTab('esports')}>
+            <span className="bets-tab-icon">🏆</span>Paris officiels
             <span className="bets-tab-count">{esportsBets.length}</span>
           </button>
-          <button
-            className={`bets-tab ${tab === 'games' ? 'active' : ''}`}
-            onClick={() => setTab('games')}
-          >
-            <span className="bets-tab-icon">🎮</span>
-            Paris en game
+          <button className={`bets-tab ${tab === 'games' ? 'active' : ''}`} onClick={() => setTab('games')}>
+            <span className="bets-tab-icon">🎮</span>Paris en game
             <span className="bets-tab-count">{tickets.length}</span>
           </button>
         </div>
 
-        {/* ── FILTRES ── */}
+        {/* Filtres */}
         <div className="bets-filters">
           {[
-            { key: 'all',     label: 'Tous',     count: currentList.length },
-            { key: 'pending', label: 'En cours', count: tab === 'esports' ? esportsBets.filter(b => b.status === 'pending').length : tickets.filter(t => t.globalStatus === 'pending').length },
-            { key: 'won',     label: 'Gagnés',   count: tab === 'esports' ? esportsBets.filter(b => b.status === 'won').length    : tickets.filter(t => t.globalStatus === 'won').length    },
-            { key: 'lost',    label: 'Perdus',   count: tab === 'esports' ? esportsBets.filter(b => b.status === 'lost').length   : tickets.filter(t => t.globalStatus === 'lost').length   },
+            { key: 'all',       label: 'Tous',        count: currentList.length },
+            { key: 'pending',   label: 'En cours',    count: (tab === 'esports' ? esportsBets : tickets).filter(x => (x.status || x.globalStatus) === 'pending').length },
+            { key: 'won',       label: 'Gagnés',      count: (tab === 'esports' ? esportsBets : tickets).filter(x => (x.status || x.globalStatus) === 'won').length },
+            { key: 'lost',      label: 'Perdus',      count: (tab === 'esports' ? esportsBets : tickets).filter(x => (x.status || x.globalStatus) === 'lost').length },
+            { key: 'cancelled', label: 'Remboursés',  count: (tab === 'esports' ? esportsBets : tickets).filter(x => (x.status || x.globalStatus) === 'cancelled').length },
           ].map(f => (
             <button key={f.key} className={`filter-btn ${filter === f.key ? 'active' : ''}`} onClick={() => setFilter(f.key)}>
-              {f.label}
-              <span className="filter-count">{f.count}</span>
+              {f.label}<span className="filter-count">{f.count}</span>
             </button>
           ))}
           {!loading && currentList.length > 0 && (
-            <div className="bets-result-count">
-              {currentList.length} ticket{currentList.length > 1 ? 's' : ''}
-              {totalPages > 1 && ` · page ${page}/${totalPages}`}
-            </div>
+            <div className="bets-result-count">{currentList.length} ticket{currentList.length > 1 ? 's' : ''}{totalPages > 1 && ` · page ${page}/${totalPages}`}</div>
           )}
         </div>
 
-        {/* ── CONTENU ── */}
+        {/* Contenu */}
         {loading ? (
-          <div className="bets-loading">
-            <div className="bets-spinner" />
-            <span>Chargement…</span>
-          </div>
+          <div className="bets-loading"><div className="bets-spinner" /><span>Chargement…</span></div>
         ) : currentList.length === 0 ? (
           <div className="bets-empty">
             <div className="bets-empty-icon">{tab === 'esports' ? '🏆' : '🎮'}</div>
@@ -435,24 +407,20 @@ export default function Bets() {
             <div className="bets-list">
               {tab === 'esports' ? (
                 paginated.map((bet, i) => (
-                  <EsportsBetRow
-                    key={bet.id}
-                    bet={bet}
-                    i={i}
-                    onCancel={b => setCancelModal(b)}
-                  />
+                  <EsportsBetRow key={bet.id} bet={bet} i={i} onCancel={b => setCancelModal(b)} />
                 ))
               ) : (
                 paginated.map((ticket, i) => {
                   const status = STATUS_CONFIG[ticket.globalStatus] || STATUS_CONFIG.pending
                   const isLive = ticket.game_status === 'live'
                   const game   = ticket.game
-                  const queue  = QUEUE_NAMES[game?.queue] || 'Ranked'
                   const ctx    = resolveGameCtx(ticket)
 
                   return (
                     <div key={ticket.key} className="ticket-row" style={{ animationDelay: `${i * 0.04}s` }}>
                       <div className="ticket-bar" style={{ background: status.color }} />
+
+                      {/* Contexte game */}
                       <div className="ticket-game-ctx">
                         <div className={`ticket-badge ${isLive ? 'live' : 'ended'}`}>
                           {isLive && <span className="ticket-badge-dot" />}
@@ -460,27 +428,26 @@ export default function Bets() {
                         </div>
                         <div className="ticket-ctx-player">
                           <div className="ticket-ctx-avatar" style={{ borderColor: ctx.borderColor }}>
-                            {ctx.imgUrl ? (
-                              <img src={ctx.imgUrl} alt={ctx.name} referrerPolicy="no-referrer" onError={e => { e.target.style.display = 'none' }} />
-                            ) : <span>{ctx.initials}</span>}
+                            {ctx.imgUrl
+                              ? <img src={ctx.imgUrl} alt={ctx.name} referrerPolicy="no-referrer" onError={e => { e.target.style.display = 'none' }} />
+                              : <span>{ctx.initials}</span>}
                           </div>
                           <div className="ticket-ctx-info">
                             <div className="ticket-ctx-name"
                               style={ctx.type === 'casual' && ctx.summonerName ? { cursor: 'pointer' } : {}}
-                              onClick={() => {
-                                if (ctx.type === 'casual' && ctx.summonerName && ctx.region)
-                                  navigate(`/player/${ctx.region}/${encodeURIComponent(ctx.summonerName)}/${ctx.tag || 'EUW'}`)
-                              }}>
+                              onClick={() => { if (ctx.type === 'casual' && ctx.summonerName && ctx.region) navigate(`/player/${ctx.region}/${encodeURIComponent(ctx.summonerName)}/${ctx.tag || 'EUW'}`) }}>
                               {ctx.name}
                             </div>
                             <div className="ticket-ctx-sub" style={{ color: ctx.subColor }}>{ctx.sub}</div>
                           </div>
                         </div>
                         <div className="ticket-ctx-meta">
-                          <span className="ticket-queue">{queue}</span>
+                          <span className="ticket-queue">{QUEUE_NAMES[game?.queue] || 'Ranked'}</span>
                           <span className="ticket-date">{timeAgo(ticket.created_at)}</span>
                         </div>
                       </div>
+
+                      {/* Sélections */}
                       <div className="ticket-body">
                         {ticket.bets.map((bet, j) => {
                           const betStatus = STATUS_CONFIG[bet.status] || STATUS_CONFIG.pending
@@ -489,37 +456,31 @@ export default function Bets() {
                           const icon      = champIcon(champName)
                           const side      = betPlayer?.side
                           const sideColor = side === 'blue' ? '#378add' : '#ef4444'
+
                           return (
                             <div key={j} className="ticket-sel">
                               <div className="ticket-champ-wrap">
-                                {icon ? (
-                                  <img src={icon} alt={champName} className="ticket-champ-icon" onError={e => { e.target.style.display = 'none' }} />
-                                ) : (
-                                  <div className="ticket-champ-placeholder">?</div>
-                                )}
+                                {icon
+                                  ? <img src={icon} alt={champName} className="ticket-champ-icon" onError={e => { e.target.style.display = 'none' }} />
+                                  : <div className="ticket-champ-placeholder">?</div>}
                                 {side && <div className="ticket-side-dot" style={{ background: sideColor }} />}
                               </div>
                               <div className="ticket-sel-info">
                                 <div className="ticket-sel-type">{BET_TYPE_LABELS[bet.bet_type] || bet.bet_type}</div>
-                                <div className="ticket-sel-detail">
-                                  {bet.bet_type === 'who_wins' && (
-                                    <span style={{ color: sideColor, fontWeight: 700 }}>
-                                      {bet.bet_value === 'blue' ? 'Blue side' : 'Red side'}
-                                    </span>
-                                  )}
-                                  {bet.bet_type === 'first_blood' && champName && (
-                                    <span style={{ color: '#e8eaf0', fontWeight: 600 }}>{champName}</span>
-                                  )}
+                                <div className="ticket-sel-detail" style={{ color: sideColor || '#e8eaf0', fontWeight: 600 }}>
+                                  {betValueLabel(bet.bet_type, bet.bet_value)}
                                 </div>
                               </div>
                               {ticket.bets.length > 1 && (
                                 <div className="ticket-sel-status" style={{ color: betStatus.color }}>{betStatus.icon}</div>
                               )}
-                              <span className="ticket-sel-odds">×2</span>
+                              <span className="ticket-sel-odds">{bet.odds ? `×${Number(bet.odds).toFixed(2)}` : '×2'}</span>
                             </div>
                           )
                         })}
                       </div>
+
+                      {/* Finances + actions */}
                       <div className="ticket-right">
                         <div className="ticket-finances">
                           <div className="ticket-fin-row">
@@ -528,16 +489,18 @@ export default function Bets() {
                           </div>
                           <div className="ticket-fin-row">
                             <span className="ticket-fin-lbl">
-                              {ticket.globalStatus === 'won' ? 'Gagné' : ticket.globalStatus === 'lost' ? 'Perdu' : 'Potentiel'}
+                              {ticket.globalStatus === 'won' ? 'Gagné' : ticket.globalStatus === 'lost' ? 'Perdu' : ticket.globalStatus === 'cancelled' ? 'Remboursé' : 'Potentiel'}
                             </span>
                             <span className="ticket-fin-val" style={{
-                              color: ticket.globalStatus === 'won' ? '#65BD62' : ticket.globalStatus === 'lost' ? '#ef4444' : '#6b7280'
+                              color: ticket.globalStatus === 'won' ? '#65BD62' : ticket.globalStatus === 'lost' ? '#ef4444' : ticket.globalStatus === 'cancelled' ? '#6b7280' : '#6b7280'
                             }}>
                               {ticket.globalStatus === 'won'
                                 ? `+${ticket.totalPayout.toLocaleString()}`
                                 : ticket.globalStatus === 'lost'
                                   ? `-${ticket.totalAmount.toLocaleString()}`
-                                  : `~${Math.floor(ticket.totalAmount * ticket.odds).toLocaleString()}`
+                                  : ticket.globalStatus === 'cancelled'
+                                    ? `+${ticket.totalAmount.toLocaleString()}`
+                                    : `~${Math.floor(ticket.totalAmount * ticket.combinedOdds).toLocaleString()}`
                               } <span className="ticket-coin-lbl">coins</span>
                             </span>
                           </div>
@@ -545,8 +508,7 @@ export default function Bets() {
                         <div className="ticket-actions">
                           {isLive && ticket.live_game_id && (
                             <button className="ticket-live-btn" onClick={() => navigate(`/game/${ticket.live_game_id}`)}>
-                              <span className="ticket-live-dot" />
-                              Voir la partie
+                              <span className="ticket-live-dot" />Voir la partie
                               <span className="ticket-live-shimmer" />
                             </button>
                           )}

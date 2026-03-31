@@ -36,7 +36,13 @@ def extract_pseudo(p: dict, champ_name: str) -> str:
 
 
 def build_team(participants: list, team_id: int) -> list:
-    team   = [p for p in participants if p.get("teamId") == team_id]
+    all_team_ids = {p.get("teamId") for p in participants}
+    if len(all_team_ids) == 1 and len(participants) == 10:
+        half = len(participants) // 2
+        team = participants[:half] if team_id == 100 else participants[half:]
+    else:
+        team = [p for p in participants if p.get("teamId") == team_id]
+    
     result = []
     for p in team:
         champ_name = (p.get("championName") or "").strip()

@@ -7,9 +7,7 @@ import resend
 
 resend.api_key = os.getenv("RESEND_API_KEY")
 
-FROM_EMAIL = "onboarding@resend.dev"   # ← change par ton domaine vérifié sur Resend
-                                                    # En dev tu peux utiliser onboarding@resend.dev
-
+FROM_EMAIL = "noreply@junglegap.fr"
 
 def _html_template(code: str, username: str) -> str:
     digits = list(code)

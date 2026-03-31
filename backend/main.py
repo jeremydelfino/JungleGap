@@ -59,6 +59,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "https://*.vercel.app",
+        "https://www.junglegap.fr",
+        "https://junglegap.fr",
     ],
     allow_methods=["*"],
     allow_headers=["*"],

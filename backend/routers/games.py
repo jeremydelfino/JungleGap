@@ -42,10 +42,6 @@ async def force_poll():
     await poll_pro_games()
     return {"status": "Poll lancé"}
 
-
-# ✅ Endpoint pour forcer la résolution des paris d'une game terminée
-# Utile pour résoudre les paris en attente sur une game déjà ended
-# Usage: POST /games/resolve/42  (id PostgreSQL de la game)
 @router.post("/resolve/{game_id}")
 async def force_resolve(game_id: int, db: Session = Depends(get_db)):
     game = db.query(LiveGame).filter(LiveGame.id == game_id).first()
@@ -164,4 +160,5 @@ def get_game(game_id: str, db: Session = Depends(get_db)):
             "accent_color":  main_pro.accent_color,
         } if main_pro else None,
         "fetched_at": game.fetched_at,
+        "odds_data": game.odds_data,
     }

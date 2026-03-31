@@ -15,3 +15,4 @@ class LiveGame(Base):
     duration_seconds    = Column(Integer, default=0)
     status              = Column(String(20), default="live")
     fetched_at          = Column(TIMESTAMP, server_default=func.now())
+    odds_data           = Column(JSONB, nullable=True)

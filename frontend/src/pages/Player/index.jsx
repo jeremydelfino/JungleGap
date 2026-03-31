@@ -14,6 +14,8 @@ const QUEUE_NAMES = {
   420: 'Ranked Solo', 440: 'Ranked Flex', 400: 'Normal', 450: 'ARAM',
 }
 
+const CHAMP_VERSION = '14.24.1'
+
 function formatDuration(seconds) {
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
@@ -23,15 +25,24 @@ function formatDuration(seconds) {
 function timeAgo(dateStr) {
   if (!dateStr) return ''
   const diff = Date.now() - new Date(dateStr).getTime()
-  const h    = Math.floor(diff / 3600000)
-  const m    = Math.floor(diff / 60000)
+  const h = Math.floor(diff / 3600000)
+  const m = Math.floor(diff / 60000)
   if (h > 24) return `il y a ${Math.floor(h / 24)}j`
   if (h > 0)  return `il y a ${h}h`
   return `il y a ${m}m`
 }
 
-function getChampionIcon(championName) {
-  return `https://ddragon.leagueoflegends.com/cdn/14.10.1/img/champion/${championName}.png`
+function getChampIcon(championName) {
+  if (!championName || championName === '???' || championName === '??') return null
+  const ddUrl = `https://ddragon.leagueoflegends.com/cdn/${CHAMP_VERSION}/img/champion/${championName}.png`
+  return `${api.defaults.baseURL}/players/proxy/icon?url=${encodeURIComponent(ddUrl)}`
+}
+
+// Résout championName depuis champMap si le champ est vide
+function resolveChampName(p, champMap) {
+  if (p.championName && p.championName.trim()) return p.championName.trim()
+  if (p.championId && champMap[String(p.championId)]) return champMap[String(p.championId)]
+  return null
 }
 
 function groupByChampion(matches) {
@@ -55,6 +66,28 @@ function groupByChampion(matches) {
     .slice(0, 5)
 }
 
+/* ── Mini champion icon réutilisable ── */
+function ChampIcon({ name, isPro, accentColor, delay = 0, size = 44 }) {
+  const icon = getChampIcon(name)
+  return (
+    <div
+      className={`live-champ${isPro ? ' live-champ-pro' : ''}`}
+      style={{
+        width: size, height: size,
+        borderColor: isPro ? accentColor : undefined,
+        boxShadow:   isPro ? `0 0 14px ${accentColor}50` : undefined,
+        animationDelay: `${delay}s`,
+      }}
+      title={name}
+    >
+      {icon
+        ? <img src={icon} alt={name} onError={e => { e.target.style.display = 'none' }} />
+        : <span>{name?.slice(0, 2)}</span>
+      }
+    </div>
+  )
+}
+
 export default function Player() {
   const { region, name, tag } = useParams()
   const navigate              = useNavigate()
@@ -65,6 +98,19 @@ export default function Player() {
   const [error,      setError]      = useState(null)
   const [isFav,      setIsFav]      = useState(false)
   const [favLoading, setFavLoading] = useState(false)
+  const [champMap,   setChampMap]   = useState({})
+
+  // Charge le mapping championId → championName depuis DDragon
+  useEffect(() => {
+    fetch(`https://ddragon.leagueoflegends.com/cdn/${CHAMP_VERSION}/data/en_US/champion.json`)
+      .then(r => r.json())
+      .then(d => {
+        const m = {}
+        Object.values(d.data).forEach(c => { m[String(parseInt(c.key))] = c.id })
+        setChampMap(m)
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     const fetchPlayer = async () => {
@@ -121,21 +167,30 @@ export default function Player() {
   const champStats  = groupByChampion(match_history || [])
   const betStats    = junglegap_profile?.bet_stats
 
-  const liveParticipant = live_game?.participants?.find(
-    p => p.puuid === player.riot_puuid || p.summonerName === player.summoner_name
+  // blue_team / red_team viennent de la BDD (format enrichi)
+  // participants vient du brut Riot (même structure mais sans stats live)
+  const blueTeam = live_game?.blue_team ?? []
+  const redTeam  = live_game?.red_team  ?? []
+
+  // Cherche le participant dans blue_team + red_team (données BDD fiables)
+  const allTeams = [...blueTeam, ...redTeam]
+  const liveParticipant = allTeams.find(
+    p => (p.puuid && p.puuid === player.riot_puuid) ||
+         (p.summonerName && p.summonerName === player.summoner_name)
   )
-  const blueKills = live_game?.participants?.filter(p => p.teamId === 100).reduce((a, p) => a + (p.kills || 0), 0) || 0
-  const redKills  = live_game?.participants?.filter(p => p.teamId === 200).reduce((a, p) => a + (p.kills || 0), 0) || 0
 
   return (
     <div className="player-page">
 
       {/* ─── BANNER ─── */}
       <div className="player-banner">
-        <div className="player-banner-bg" style={pro_player
-          ? { background: `linear-gradient(135deg, ${accentColor}22 0%, #171717 65%)` }
-          : { background: 'linear-gradient(135deg, #65BD6210 0%, #171717 65%)' }
-        } />
+        <div
+          className="player-banner-bg"
+          style={pro_player
+            ? { background: `linear-gradient(135deg, ${accentColor}28 0%, #171717 70%)` }
+            : { background: 'linear-gradient(135deg, #65BD6212 0%, #171717 70%)' }
+          }
+        />
         {pro_player?.team_logo_url && (
           <img className="player-banner-team-logo" src={pro_player.team_logo_url} alt={pro_player.team} referrerPolicy="no-referrer" />
         )}
@@ -144,14 +199,19 @@ export default function Player() {
 
       {/* ─── HERO FLOTTANT ─── */}
       <div className="pro-float-card">
-        <div className="pro-photo-card" style={!pro_player?.photo_url ? { display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1f1f1f' } : {}}>
+        <div
+          className="pro-photo-card"
+          style={!pro_player?.photo_url ? { display: 'flex', alignItems: 'center', justifyContent: 'center' } : {}}
+        >
           {pro_player?.photo_url ? (
-            <img src={pro_player.photo_url} alt={pro_player.name} referrerPolicy="no-referrer"
-              style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} />
+            <img src={pro_player.photo_url} alt={pro_player.name} referrerPolicy="no-referrer" />
           ) : player.profile_icon_url ? (
-            <img src={player.profile_icon_url} alt={player.summoner_name}
-              style={{ width: '88px', height: '88px', borderRadius: '12px', objectFit: 'cover' }}
-              referrerPolicy="no-referrer" onError={e => { e.target.style.display = 'none' }} />
+            <img
+              src={player.profile_icon_url} alt={player.summoner_name}
+              style={{ width: '90px', height: '90px', borderRadius: '14px', objectFit: 'cover' }}
+              referrerPolicy="no-referrer"
+              onError={e => { e.target.style.display = 'none' }}
+            />
           ) : (
             <div className="pro-photo-initials">{player.summoner_name?.slice(0, 2).toUpperCase()}</div>
           )}
@@ -199,41 +259,99 @@ export default function Player() {
         {/* ── COL GAUCHE ── */}
         <div className="left-col">
 
-          {/* Live game */}
+          {/* ── Live game ── */}
           {live_game ? (
             <div className="live-card">
-              <div className="live-card-line" style={{ background: `linear-gradient(90deg, ${accentColor}, #65BD62)` }} />
+              {/* Barre accent top */}
+              <div
+                className="live-card-bar"
+                style={{ background: `linear-gradient(90deg, ${accentColor}, ${accentColor}55)` }}
+              />
+              {/* Fond accent radial */}
+              <div
+                className="live-card-glow"
+                style={{ background: `radial-gradient(ellipse at 50% 120%, ${accentColor}, transparent 70%)` }}
+              />
+
+              {/* Header */}
               <div className="live-header">
                 <div className="live-title">
                   <span className="live-dot" />
-                  {QUEUE_NAMES[live_game.gameQueueConfigId] || 'Ranked'} · {formatDuration(live_game.gameLength || 0)}
+                  {QUEUE_NAMES[live_game.gameQueueConfigId] || QUEUE_NAMES[live_game.queue_type] || 'Ranked'}
+                  <span className="live-sep">·</span>
+                  <span className="live-queue">{formatDuration(live_game.gameLength || live_game.duration_seconds || 0)}</span>
                 </div>
                 <button className="live-btn" onClick={() => navigate(`/game/${live_game.id}`)}>
                   Voir & Parier →
                   <span className="live-btn-shimmer" />
                 </button>
               </div>
-              <div className="live-body">
-                <div className="live-score-block">
-                  <div className="live-side-label">Blue</div>
-                  <div className="live-score blue">{blueKills}</div>
+
+              {/* Matchup champions */}
+              <div className="live-matchup">
+
+                {/* Blue side */}
+                <div className="live-champs-row">
+                  <span className="live-side-tag blue">Blue</span>
+                  <div className="live-champs">
+                    {blueTeam.slice(0, 5).map((p, i) => {
+                      const cName = resolveChampName(p, champMap)
+                      const isPro = (p.puuid && p.puuid === player.riot_puuid) ||
+                                    (p.summonerName && p.summonerName === player.summoner_name)
+                      return (
+                        <ChampIcon
+                          key={i}
+                          name={cName}
+                          isPro={isPro}
+                          accentColor={accentColor}
+                          delay={i * 0.04}
+                        />
+                      )
+                    })}
+                  </div>
                 </div>
-                <div className="live-vs">vs</div>
-                <div className="live-score-block right">
-                  <div className="live-side-label">Red</div>
-                  <div className="live-score red">{redKills}</div>
+
+                {/* VS divider */}
+                <div className="live-vs-row">
+                  <div className="live-vs-line" style={{ background: '#3a6fa818' }} />
+                  <span className="live-vs-text">VS</span>
+                  <div className="live-vs-line" style={{ background: '#b03c3c18' }} />
                 </div>
-                {liveParticipant && (
-                  <>
-                    <div className="live-divider" />
-                    <div className="live-player-stats">
-                      <span className="live-champ-name">{liveParticipant.championName}</span>
-                      <span className="live-kda">{liveParticipant.kills}/{liveParticipant.deaths}/{liveParticipant.assists}</span>
-                      <span className="live-cs">{liveParticipant.totalMinionsKilled} CS</span>
-                    </div>
-                  </>
-                )}
+
+                {/* Red side */}
+                <div className="live-champs-row">
+                  <span className="live-side-tag red">Red</span>
+                  <div className="live-champs">
+                    {redTeam.slice(0, 5).map((p, i) => {
+                      const cName = resolveChampName(p, champMap)
+                      return (
+                        <ChampIcon
+                          key={i}
+                          name={cName}
+                          isPro={false}
+                          accentColor={accentColor}
+                          delay={i * 0.04}
+                        />
+                      )
+                    })}
+                  </div>
+                </div>
               </div>
+
+              {/* Strip : champion du joueur suivi */}
+              {liveParticipant && (() => {
+                const lpChamp = resolveChampName(liveParticipant, champMap)
+                return (
+                  <div className="live-pro-strip">
+                    {lpChamp && <span className="live-pro-champ">{lpChamp}</span>}
+                    {liveParticipant.role && lpChamp && <span className="live-pro-sep">·</span>}
+                    {liveParticipant.role && <span className="live-pro-kda">{liveParticipant.role}</span>}
+                    {liveParticipant.summonerName && (
+                      <span className="live-pro-cs">{liveParticipant.summonerName}</span>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
           ) : (
             <div className="no-game">
@@ -245,19 +363,30 @@ export default function Player() {
             </div>
           )}
 
-          {/* Champion stats */}
+          {/* ── Champion stats ── */}
           {champStats.length > 0 && (
             <div className="section-block">
-              <div className="section-label">Champions joués <span className="section-label-sub">10 dernières parties</span></div>
+              <div className="section-label">
+                Champions joués
+                <span className="section-label-sub">10 dernières parties</span>
+              </div>
               <div className="champ-grid">
                 {champStats.map((c, i) => (
                   <div className="champ-card" key={i}>
                     <div className="champ-img">
-                      <img src={getChampionIcon(c.name)} alt={c.name} referrerPolicy="no-referrer" onError={e => { e.target.style.display = 'none' }} />
+                      <img
+                        src={`https://ddragon.leagueoflegends.com/cdn/${CHAMP_VERSION}/img/champion/${c.name}.png`}
+                        alt={c.name}
+                        referrerPolicy="no-referrer"
+                        onError={e => { e.target.style.display = 'none' }}
+                      />
                     </div>
                     <div className="champ-name">{c.name}</div>
                     <div className="champ-kda">{c.kda} KDA</div>
-                    <div className="champ-wr" style={{ color: c.winrate >= 60 ? '#65BD62' : c.winrate >= 50 ? '#e2b147' : '#ef4444' }}>
+                    <div
+                      className="champ-wr"
+                      style={{ color: c.winrate >= 60 ? '#65BD62' : c.winrate >= 50 ? '#e2b147' : '#ef4444' }}
+                    >
                       {c.winrate}% <span className="champ-games">{c.games}G</span>
                     </div>
                   </div>
@@ -266,23 +395,32 @@ export default function Player() {
             </div>
           )}
 
-          {/* Match history */}
+          {/* ── Match history ── */}
           {match_history?.length > 0 && (
             <div className="section-block">
-              <div className="section-label">Historique <span className="section-label-sub">10 dernières parties</span></div>
+              <div className="section-label">
+                Historique
+                <span className="section-label-sub">10 dernières parties</span>
+              </div>
               <div className="match-list">
                 {match_history.map((m, i) => (
                   <div className={`match-row ${m.win ? 'win' : 'loss'}`} key={i}>
                     <div className="match-result-pill">{m.win ? 'V' : 'D'}</div>
                     <div className="match-champ">
-                      <img src={getChampionIcon(m.champion)} alt={m.champion} onError={e => { e.target.style.display = 'none' }} />
+                      <img
+                        src={`https://ddragon.leagueoflegends.com/cdn/${CHAMP_VERSION}/img/champion/${m.champion}.png`}
+                        alt={m.champion}
+                        onError={e => { e.target.style.display = 'none' }}
+                      />
                     </div>
                     <div className="match-info">
                       <div className="match-name">{m.champion}{m.role ? ` · ${m.role}` : ''}</div>
                       <div className="match-meta">{timeAgo(m.played_at)} · {formatDuration(m.duration)}</div>
                     </div>
                     <div className="match-right">
-                      <div className="match-kda">{m.kills}<span className="match-kda-sep">/</span>{m.deaths}<span className="match-kda-sep">/</span>{m.assists}</div>
+                      <div className="match-kda">
+                        {m.kills}<span className="match-kda-sep">/</span>{m.deaths}<span className="match-kda-sep">/</span>{m.assists}
+                      </div>
                       <div className="match-cs">{m.cs} CS</div>
                     </div>
                   </div>
@@ -322,7 +460,7 @@ export default function Player() {
               <div className="jg-stats-grid">
                 <div className="jg-stat">
                   <div className="jg-stat-val green">
-                    {betStats?.winrate !== null && betStats?.winrate !== undefined ? `${betStats.winrate}%` : '—'}
+                    {betStats?.winrate != null ? `${betStats.winrate}%` : '—'}
                   </div>
                   <div className="jg-stat-lbl">Win rate</div>
                 </div>
@@ -331,7 +469,9 @@ export default function Player() {
                   <div className="jg-stat-lbl">Paris gagnés</div>
                 </div>
                 <div className="jg-stat">
-                  <div className="jg-stat-val gold">{betStats?.streak > 0 ? `🔥 ${betStats.streak}` : betStats?.streak ?? '—'}</div>
+                  <div className="jg-stat-val gold">
+                    {betStats?.streak > 0 ? `🔥 ${betStats.streak}` : betStats?.streak ?? '—'}
+                  </div>
                   <div className="jg-stat-lbl">Streak</div>
                 </div>
                 <div className="jg-stat">
@@ -340,10 +480,7 @@ export default function Player() {
                 </div>
               </div>
 
-              <button
-                className="jg-profile-btn"
-                onClick={() => navigate(`/profile/${junglegap_profile.id}`)}
-              >
+              <button className="jg-profile-btn" onClick={() => navigate(`/profile/${junglegap_profile.id}`)}>
                 Voir le profil →
                 <span className="jg-profile-btn-shimmer" />
               </button>

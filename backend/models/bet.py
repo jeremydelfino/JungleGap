@@ -13,6 +13,7 @@ class Bet(Base):
     bet_type_slug   = Column(String(50), ForeignKey("bet_types.slug"), nullable=False)
     bet_value       = Column(String(100), nullable=False)
     amount          = Column(Integer, nullable=False)
+    odds            = Column(Float, default=2.0)
     boost_applied   = Column(Float, default=0)
     status          = Column(String(20), default="pending")
     payout          = Column(Integer, default=0)

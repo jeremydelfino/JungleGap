@@ -9,12 +9,32 @@ from models.user import User
 from models.bet_type import BetType
 from models.transaction import Transaction
 from deps import get_current_user
+from services.live_odds_engine import FIXED_ODDS
 
 router = APIRouter(prefix="/bets", tags=["bets"])
 
-VALID_BET_TYPES  = {"who_wins", "first_blood"}
-VALID_WIN_VALUES = {"blue", "red"}
 DDV = "14.24.1"
+
+VALID_BET_TYPES = {
+    "who_wins", "first_blood", "first_tower", "first_dragon", "first_baron",
+    "game_duration_under25", "game_duration_25_35", "game_duration_over35",
+    "player_positive_kda",
+    "champion_kda_over25", "champion_kda_over5", "champion_kda_over10",
+    "top_damage",
+    "jungle_gap",
+}
+
+CHAMP_BET_TYPES = {
+    "first_blood", "player_positive_kda",
+    "champion_kda_over25", "champion_kda_over5", "champion_kda_over10",
+    "top_damage",
+}
+
+# Types qui attendent "blue" ou "red" comme bet_value
+SIDE_BET_TYPES = {"who_wins", "first_tower", "first_dragon", "first_baron"}
+
+# Types sans bet_value côté (on valide juste que c'est non-vide)
+DURATION_BET_TYPES = {"game_duration_under25", "game_duration_25_35", "game_duration_over35"}
 
 
 class PlaceBetSchema(BaseModel):
@@ -43,54 +63,77 @@ def place_bet(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # ── Type actif en base ────────────────────────────────────
     bet_type = db.query(BetType).filter(
-        BetType.slug == body.bet_type_slug,
+        BetType.slug      == body.bet_type_slug,
         BetType.is_active == True,
     ).first()
     if not bet_type:
         raise HTTPException(400, "Type de pari invalide ou inactif")
 
-    if body.bet_type_slug == "who_wins" and body.bet_value not in VALID_WIN_VALUES:
-        raise HTTPException(400, "Valeur invalide pour who_wins (blue ou red)")
-
+    # ── Game ──────────────────────────────────────────────────
     game = db.query(LiveGame).filter(LiveGame.id == body.live_game_id).first()
     if not game:
         raise HTTPException(404, "Partie introuvable")
     if game.status != "live":
         raise HTTPException(400, "Cette partie est terminée")
 
-    existing = db.query(Bet).filter(
-        Bet.user_id      == current_user.id,
-        Bet.live_game_id == body.live_game_id,
-        Bet.bet_type_slug == body.bet_type_slug,
-        Bet.status       == "pending",
-    ).first()
-    if existing:
-        raise HTTPException(400, "Tu as déjà un pari en cours sur ce type pour cette partie")
+    # ── Validation bet_value selon le type ────────────────────
+    all_players  = (game.blue_team or []) + (game.red_team or [])
+    champ_names  = {p.get("championName", "") for p in all_players if p.get("championName")}
 
+    if body.bet_type_slug in SIDE_BET_TYPES:
+        if body.bet_value not in {"blue", "red"}:
+            raise HTTPException(400, f"Valeur invalide pour {body.bet_type_slug} — attendu : blue ou red")
+
+    elif body.bet_type_slug in CHAMP_BET_TYPES:
+        if body.bet_value not in champ_names:
+            raise HTTPException(400, f"Champion '{body.bet_value}' introuvable dans cette partie")
+
+    elif body.bet_type_slug in DURATION_BET_TYPES:
+        # Pas de validation sur bet_value — on stocke le slug lui-même comme confirmation
+        # bet_value = "confirmed" ou n'importe quoi de non-vide
+        if not body.bet_value:
+            raise HTTPException(400, "bet_value manquant")
+
+    # ── Un seul pari par type par game ───────────────────────
+        existing = db.query(Bet).filter(
+            Bet.user_id       == current_user.id,
+            Bet.live_game_id  == body.live_game_id,
+            Bet.bet_type_slug == body.bet_type_slug,
+            Bet.bet_value     == body.bet_value,
+            Bet.status        == "pending",
+        ).first()
+        if existing:
+            raise HTTPException(400, f"Tu as déjà ce pari en cours sur cette partie")
+    # ── Solde ─────────────────────────────────────────────────
     if current_user.coins < body.amount:
         raise HTTPException(400, "Coins insuffisants")
 
-    boost = 0
+    # ── Récupération de la côte depuis odds_data ──────────────
+    odds_data = game.odds_data or {}
+    odds      = _resolve_odds(body.bet_type_slug, body.bet_value, odds_data)
+
+    # ── Création du pari ──────────────────────────────────────
     current_user.coins -= body.amount
 
     bet = Bet(
-        user_id=current_user.id,
-        live_game_id=body.live_game_id,
-        card_used_id=body.card_used_id,
-        bet_type_slug=body.bet_type_slug,
-        bet_value=body.bet_value,
-        amount=body.amount,
-        boost_applied=boost,
-        status="pending",
+        user_id       = current_user.id,
+        live_game_id  = body.live_game_id,
+        card_used_id  = body.card_used_id,
+        bet_type_slug = body.bet_type_slug,
+        bet_value     = body.bet_value,
+        amount        = body.amount,
+        odds          = odds,
+        boost_applied = 0,
+        status        = "pending",
     )
     db.add(bet)
-
     db.add(Transaction(
-        user_id=current_user.id,
-        type="bet_placed",
-        amount=-body.amount,
-        description=f"Pari placé sur {bet_type.label} — {body.bet_value}",
+        user_id     = current_user.id,
+        type        = "bet_placed",
+        amount      = -body.amount,
+        description = f"Pari placé sur {bet_type.label} — {body.bet_value} (×{odds})",
     ))
 
     db.commit()
@@ -99,29 +142,50 @@ def place_bet(
     return {
         "bet_id":         bet.id,
         "amount":         body.amount,
-        "boost_applied":  boost,
+        "odds":           odds,
+        "boost_applied":  0,
         "coins_restants": current_user.coins,
     }
 
 
+def _resolve_odds(slug: str, value: str, odds_data: dict) -> float:
+    """
+    Récupère la côte depuis odds_data (calculée au démarrage de la game).
+    Fallback sur FIXED_ODDS si absente.
+    """
+    try:
+        if slug == "who_wins":
+            return float(odds_data.get("who_wins", {}).get(value, 2.0))
+        if slug == "first_tower":
+            return float(odds_data.get("first_tower",  {}).get(value, FIXED_ODDS["first_tower"]))
+        if slug == "first_dragon":
+            return float(odds_data.get("first_dragon", {}).get(value, FIXED_ODDS["first_dragon"]))
+        if slug == "first_baron":
+            return float(odds_data.get("first_baron",  {}).get(value, FIXED_ODDS["first_baron"]))
+        if slug == "jungle_gap":
+            return float(odds_data.get("jungle_gap",   {}).get(value, 2.0))
+        if slug == "first_blood":
+            return float(odds_data.get("first_blood", FIXED_ODDS["first_blood"]))
+        if slug in ("game_duration_under25", "game_duration_25_35", "game_duration_over35",
+                    "player_positive_kda", "champion_kda_over25", "champion_kda_over5",
+                    "champion_kda_over10", "top_damage"):
+            return float(odds_data.get(slug, FIXED_ODDS.get(slug, 2.0)))
+    except (TypeError, ValueError):
+        pass
+    return FIXED_ODDS.get(slug, 2.0)
+
+
 def _find_player_in_game(game: LiveGame, bet_value: str, bet_type: str) -> dict | None:
-    """Trouve le joueur/champion concerné par le pari dans la game."""
     if bet_type == "who_wins":
-        # Renvoie le pro de l'équipe pariée s'il existe
         team = game.blue_team if bet_value == "blue" else game.red_team
         for p in (team or []):
             if p.get("pro"):
                 return p
         return None
-
-    if bet_type == "first_blood":
-        # bet_value = nom du champion
-        champ_name = bet_value
+    if bet_type in CHAMP_BET_TYPES:
         for p in (game.blue_team or []) + (game.red_team or []):
-            if p.get("championName") == champ_name:
+            if p.get("championName") == bet_value:
                 return p
-        return None
-
     return None
 
 
@@ -137,13 +201,11 @@ def get_my_bets(
         .all()
     )
 
-    # Charger toutes les games en une requête
     game_ids = {b.live_game_id for b in bets if b.live_game_id}
-    games = {
+    games    = {
         g.id: g for g in db.query(LiveGame).filter(LiveGame.id.in_(game_ids)).all()
     } if game_ids else {}
 
-    # Charger les pros liés aux games
     all_puuids = set()
     for g in games.values():
         for p in (g.blue_team or []) + (g.red_team or []):
@@ -158,46 +220,41 @@ def get_my_bets(
     for b in bets:
         game = games.get(b.live_game_id)
 
-        # ── Infos game de base ────────────────────────────────────────────────
         game_info = None
         if game:
-            # Trouver le pro principal de la game
             all_players = (game.blue_team or []) + (game.red_team or [])
-            main_pro = None
+            main_pro    = None
             for p in all_players:
                 pro = pros_by_puuid.get(p.get("puuid", ""))
                 if pro:
                     main_pro = pro
                     break
 
-            # Champion concerné par le pari
             champion_name = None
             player_name   = None
             player_puuid  = None
             player_region = main_pro.region if main_pro else "EUW"
 
-            if b.bet_type_slug == "first_blood":
-                # Le champ bet_value = nom du champion
+            if b.bet_type_slug in CHAMP_BET_TYPES:
                 champion_name = b.bet_value
                 for p in all_players:
                     if p.get("championName") == champion_name:
                         player_name  = p.get("summonerName", "")
                         player_puuid = p.get("puuid", "")
-                        # Chercher si c'est un pro
                         pro = pros_by_puuid.get(player_puuid)
                         if pro:
                             player_name = pro.name
                         break
 
-            elif b.bet_type_slug == "who_wins":
+            elif b.bet_type_slug in SIDE_BET_TYPES:
                 team = game.blue_team if b.bet_value == "blue" else game.red_team
                 for p in (team or []):
                     pro = pros_by_puuid.get(p.get("puuid", ""))
                     if pro and not main_pro:
                         main_pro = pro
                     if not player_name:
-                        player_name  = p.get("summonerName", "")
-                        player_puuid = p.get("puuid", "")
+                        player_name   = p.get("summonerName", "")
+                        player_puuid  = p.get("puuid", "")
                         champion_name = p.get("championName", "")
                     if pro:
                         player_name   = pro.name
@@ -206,29 +263,27 @@ def get_my_bets(
                         break
 
             game_info = {
-                "id":           game.id,
-                "status":       game.status,
-                "queue":        game.queue_type,
-                "blue_score":   sum(p.get("kills", 0) for p in (game.blue_team or [])),
-                "red_score":    sum(p.get("kills", 0) for p in (game.red_team  or [])),
-                # Pro principal de la game
+                "id":         game.id,
+                "status":     game.status,
+                "queue":      game.queue_type,
+                "blue_score": sum(p.get("kills", 0) for p in (game.blue_team or [])),
+                "red_score":  sum(p.get("kills", 0) for p in (game.red_team  or [])),
                 "pro": {
-                    "id":        main_pro.id,
-                    "name":      main_pro.name,
-                    "team":      main_pro.team,
-                    "role":      main_pro.role,
-                    "photo_url": main_pro.photo_url,
-                    "region":    main_pro.region,
+                    "id":           main_pro.id,
+                    "name":         main_pro.name,
+                    "team":         main_pro.team,
+                    "role":         main_pro.role,
+                    "photo_url":    main_pro.photo_url,
+                    "region":       main_pro.region,
                     "accent_color": main_pro.accent_color,
                 } if main_pro else None,
-                # Joueur/champion directement concerné par le pari
                 "bet_player": {
                     "summoner_name": player_name,
                     "puuid":         player_puuid,
                     "champion_name": champion_name,
                     "champion_icon": f"https://ddragon.leagueoflegends.com/cdn/{DDV}/img/champion/{champion_name}.png" if champion_name else None,
                     "region":        player_region,
-                    "side":          b.bet_value if b.bet_type_slug == "who_wins" else (
+                    "side":          b.bet_value if b.bet_type_slug in SIDE_BET_TYPES else (
                         "blue" if any(p.get("championName") == champion_name for p in (game.blue_team or []))
                         else "red"
                     ),
@@ -242,6 +297,7 @@ def get_my_bets(
             "bet_type":      b.bet_type_slug,
             "bet_value":     b.bet_value,
             "amount":        b.amount,
+            "odds":          b.odds,
             "boost_applied": b.boost_applied,
             "status":        b.status,
             "payout":        b.payout,
