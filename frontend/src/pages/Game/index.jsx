@@ -181,19 +181,20 @@ export default function Game(){
   useEffect(()=>{loadGame()},[loadGame])
   useEffect(()=>{if(!game||game.status==='ended')return;const iv=setInterval(loadGame,30000);return()=>clearInterval(iv)},[game,loadGame])
 
-    const processTeam=useCallback((team)=>{
-      if(!team||!Object.keys(champMap).length)return[]
-      const players=team.map(p=>{const rn=(p.championName?.trim()&&p.championName!=='Unknown')?p.championName.trim():(p.championId?champMap[String(p.championId)]:null)??null;return{...p,championName:rn,role:normR(p.role),_tagRole:rn?champTagMap[rn]??null:null}})
-      const assigned=new Map(),used=new Set()
-      players.forEach((p,i)=>{const r=p.role;if(r&&ROLE_ORDER.includes(r)&&!used.has(r)){assigned.set(i,r);used.add(r)}})
-      players.forEach((p,i)=>{if(assigned.has(i))return;const{role,conf}=detectRole(p.spell1Id,p.spell2Id,p._tagRole);if(role&&conf>=95&&!used.has(role)){assigned.set(i,role);used.add(role)}})
-      players.forEach((p,i)=>{if(assigned.has(i))return;const{role,conf}=detectRole(p.spell1Id,p.spell2Id,p._tagRole);if(role&&conf>=72&&!['ADC','SUPPORT'].includes(role)&&!used.has(role)){assigned.set(i,role);used.add(role)}})
-      players.forEach((p,i)=>{if(assigned.has(i))return;const{hint}=detectRole(p.spell1Id,p.spell2Id,p._tagRole);const best=hint==='TP'||hint==='IGN'?['TOP','MID'].find(r=>!used.has(r)):null;if(best){assigned.set(i,best);used.add(best)}})
-      resolveAdcSupport(players,assigned,used)
-      const free=ROLE_ORDER.filter(r=>!used.has(r));let fi=0
-      players.forEach((_,i)=>{if(!assigned.has(i)&&fi<free.length)assigned.set(i,free[fi++])})
-      return players.map((p,i)=>({...p,role:assigned.get(i)||'TOP'})).sort((a,b)=>ROLE_ORDER.indexOf(a.role)-ROLE_ORDER.indexOf(b.role))
-  },[champMap,champTagMap])
+    const processTeam = useCallback((team) => {
+      if (!team || !Object.keys(champMap).length) return []
+    
+      const players = team.map(p => {
+        const rn = (p.championName?.trim() && p.championName !== 'Unknown')
+          ? p.championName.trim()
+          : (p.championId ? champMap[String(p.championId)] : null) ?? null
+        return { ...p, championName: rn, role: normR(p.role) ?? 'TOP' }
+      })
+    
+      return players.sort((a, b) =>
+        ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role)
+      )
+    }, [champMap])
   
   const blue=useMemo(()=>processTeam(game?.blue_team),[game?.blue_team,processTeam])
   const red =useMemo(()=>processTeam(game?.red_team), [game?.red_team, processTeam])

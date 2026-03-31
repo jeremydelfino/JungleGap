@@ -28,6 +28,7 @@ from models.favorite import UserFavorite
 from models.notification import Notification
 from services.riot import get_live_game_by_puuid, get_match_result
 from services.live_odds_engine import compute_live_odds, FIXED_ODDS
+from services.role_detector import assign_roles
 
 logger = logging.getLogger(__name__)
 
@@ -75,88 +76,70 @@ def extract_summoner_name(p: dict) -> str:
 
 SMITE = 11
 
-# Ordre canonique des rôles en Spectator V5 (position dans la liste par teamId)
-# Riot retourne les participants dans cet ordre : TOP, JGL, MID, BOT, SUP
-ROLE_BY_INDEX = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
-
-def detect_role_live(p: dict, team_index: int) -> str:
-    """
-    Détecte le rôle d'un joueur depuis les données Spectator V5.
-    Priorité :
-      1. Smite → JUNGLE (100% fiable)
-      2. DB ProPlayer (si PUUID connu) → géré en amont dans build_teams
-      3. Index dans la liste (ordre Riot : TOP/JGL/MID/BOT/SUP)
-    """
-    spells = {p.get("spell1Id"), p.get("spell2Id")}
-    if SMITE in spells:
-        return "JUNGLE"
-    # Fallback : position dans la liste de l'équipe (0→TOP, 1→JGL, 2→MID, 3→BOT, 4→SUP)
-    if 0 <= team_index < len(ROLE_BY_INDEX):
-        return ROLE_BY_INDEX[team_index]
-    return ""
-
-def build_participant(p: dict, team_index: int, pro_role: str | None = None) -> dict:
-    """
-    Construit un participant pour le stockage en DB depuis les données Spectator V5.
-    pro_role : rôle issu de la DB ProPlayer si le joueur est un pro connu.
-    """
-    champ_id   = p.get("championId")
-    champ_name = p.get("championName") or (get_champ_name(champ_id) if champ_id else "")
-    spells     = {p.get("spell1Id"), p.get("spell2Id")}
-
-    # Priorité rôle : pro_role (DB) > Smite > index
-    if pro_role:
-        role = pro_role
-    elif SMITE in spells:
-        role = "JUNGLE"
-    else:
-        role = ROLE_BY_INDEX[team_index] if 0 <= team_index < len(ROLE_BY_INDEX) else ""
-
-    return {
-        "puuid":        p.get("puuid") or "",
-        "summonerName": extract_summoner_name(p),
-        "championId":   champ_id,
-        "championName": champ_name,
-        "teamId":       p.get("teamId"),
-        "role":         role,
-        "spell1Id":     p.get("spell1Id"),
-        "spell2Id":     p.get("spell2Id"),
-    }
 
 def build_teams(participants: list, pro_puuid_to_role: dict) -> tuple[list, list]:
     """
     Construit blue_team et red_team depuis les participants Spectator V5.
     pro_puuid_to_role : { puuid: role } pour les pros connus en DB.
-    Conserve l'index dans la liste de chaque équipe pour le fallback de rôle.
+
+    Rôle attribué par priorité :
+      1. pro_puuid_to_role (BDD ProPlayer) — source la plus fiable
+      2. assign_roles() basé sur les summoner spells — détection par équipe entière
     """
     blue_raw = [p for p in participants if p.get("teamId") == 100]
     red_raw  = [p for p in participants if p.get("teamId") == 200]
 
-    blue_team = [
-        build_participant(p, i, pro_puuid_to_role.get(p.get("puuid")))
-        for i, p in enumerate(blue_raw)
-    ]
-    red_team = [
-        build_participant(p, i, pro_puuid_to_role.get(p.get("puuid")))
-        for i, p in enumerate(red_raw)
-    ]
-    return blue_team, red_team
+    def build_side(raw: list) -> list:
+        spell_roles = assign_roles(raw)
+        result = []
+        for i, p in enumerate(raw):
+            champ_id   = p.get("championId")
+            champ_name = p.get("championName") or (get_champ_name(champ_id) if champ_id else "")
+            puuid      = p.get("puuid") or ""
+            # Priorité : pro DB > détection par spells
+            role = pro_puuid_to_role.get(puuid) or spell_roles[i]
+            result.append({
+                "puuid":        puuid,
+                "summonerName": extract_summoner_name(p),
+                "championId":   champ_id,
+                "championName": champ_name,
+                "teamId":       p.get("teamId"),
+                "role":         role,
+                "spell1Id":     p.get("spell1Id"),
+                "spell2Id":     p.get("spell2Id"),
+            })
+        return result
+
+    return build_side(blue_raw), build_side(red_raw)
+
 
 def patch_team(team: list, puuid_to_participant: dict, pro_puuid_to_role: dict) -> list:
+    """
+    Met à jour une équipe déjà en BDD avec les nouvelles données live
+    (summoner names, champion names, spells, rôles).
+    Recalcule les rôles via assign_roles() sur les données fraîches.
+    """
+    live_list   = [puuid_to_participant.get(p.get("puuid"), {}) for p in team]
+    spell_roles = assign_roles(live_list)
+
     result = []
     for i, p in enumerate(team):
-        live_p     = puuid_to_participant.get(p.get("puuid"), {})
-        champ_id   = p.get("championId") or live_p.get("championId")
-        champ_name = p.get("championName") or live_p.get("championName") or (get_champ_name(champ_id) if champ_id else "")
-        spells     = {live_p.get("spell1Id"), live_p.get("spell2Id")}
+        puuid  = p.get("puuid", "")
+        live_p = puuid_to_participant.get(puuid, {})
 
-        puuid = p.get("puuid", "")
+        champ_id   = p.get("championId") or live_p.get("championId")
+        champ_name = (
+            p.get("championName")
+            or live_p.get("championName")
+            or (get_champ_name(champ_id) if champ_id else "")
+        )
+
         if pro_puuid_to_role.get(puuid):
             role = pro_puuid_to_role[puuid]
-        elif SMITE in spells:
-            role = "JUNGLE"
+        elif live_p.get("spell1Id") is not None:
+            role = spell_roles[i]
         else:
-            role = p.get("role") or (ROLE_BY_INDEX[i] if 0 <= i < len(ROLE_BY_INDEX) else "")
+            role = p.get("role") or spell_roles[i]
 
         result.append({
             **p,
@@ -167,6 +150,7 @@ def patch_team(team: list, puuid_to_participant: dict, pro_puuid_to_role: dict) 
             "role":         role,
         })
     return result
+
 
 def needs_patch(team: list) -> bool:
     return any(
@@ -253,7 +237,6 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
             return
 
         # ── 5 tentatives espacées de 60s pour attendre MATCH-V5 ──
-        # Note: puuid non utilisé dans get_match_result (appel direct par match ID)
         result = None
         for attempt in range(5):
             logger.info(f"   🔍 Tentative {attempt + 1}/5 MATCH-V5 pour {riot_game_id}...")
@@ -310,7 +293,6 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
 
         all_players = (game.blue_team or []) + (game.red_team or [])
 
-        # Index championName (lowercase) → puuid
         puuid_by_champ: dict[str, str] = {
             p.get("championName", "").lower(): p.get("puuid", "")
             for p in all_players
@@ -462,7 +444,6 @@ async def poll_pro_games():
 
         logger.info(f"🎮 Poll: vérification de {len(pros)} pros...")
 
-        # Map puuid → role pour tous les pros connus en DB
         pro_puuid_to_role: dict[str, str] = {
             p.riot_puuid: p.role
             for p in pros
