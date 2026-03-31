@@ -188,7 +188,7 @@ export default function Game(){
         const rn = (p.championName?.trim() && p.championName !== 'Unknown')
           ? p.championName.trim()
           : (p.championId ? champMap[String(p.championId)] : null) ?? null
-        return { ...p, championName: rn, role: normR(p.role) ?? 'TOP' }
+        return { ...p, championName: rn, role: normR(p.role) ?? 'FILL'}
       })
     
       return players.sort((a, b) =>

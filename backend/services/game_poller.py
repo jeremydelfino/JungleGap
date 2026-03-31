@@ -1,6 +1,9 @@
 import asyncio
 import logging
+import time
 import httpx
+from dotenv import load_dotenv
+import os
 
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -28,36 +31,41 @@ from models.favorite import UserFavorite
 from models.notification import Notification
 from services.riot import get_live_game_by_puuid, get_match_result
 from services.live_odds_engine import compute_live_odds, FIXED_ODDS
-from services.role_detector import assign_roles
+from services.role_detector import assign_roles, ROLE_MAP
 
 logger = logging.getLogger(__name__)
+
+load_dotenv()
+RIOT_API_KEY = os.getenv("RIOT_API_KEY")
 
 CHAMP_VERSION = "14.24.1"
 
 # ──────────────────────────────────────────────────────────────
-# CHAMPION ID → NAME MAPPING
+# CHAMPION MAPPING
 # ──────────────────────────────────────────────────────────────
 
-_champ_id_to_name: dict[int, str] = {}
+_champ_id_to_name:   dict[int, str]        = {}
+_champ_name_to_tags: dict[str, list[str]]  = {}
 
 async def load_champion_mapping():
-    global _champ_id_to_name
-    url = f"https://ddragon.leagueoflegends.com/cdn/{CHAMP_VERSION}/data/en_US/champion.json"
+    global _champ_id_to_name, _champ_name_to_tags
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(url)
+            versions = await client.get("https://ddragon.leagueoflegends.com/api/versions.json")
+            latest   = versions.json()[0]
+
+            resp = await client.get(
+                f"https://ddragon.leagueoflegends.com/cdn/{latest}/data/en_US/champion.json"
+            )
             data = resp.json()
-        _champ_id_to_name = {
-            int(v["key"]): v["id"]
-            for v in data["data"].values()
-        }
-        logger.info(f"✅ Champion mapping chargé — {len(_champ_id_to_name)} champions")
+        _champ_id_to_name   = {int(v["key"]): v["id"] for v in data["data"].values()}
+        _champ_name_to_tags = {v["id"]: v["tags"]     for v in data["data"].values()}
+        logger.info(f"✅ Champion mapping chargé v{latest} — {len(_champ_id_to_name)} champions")
     except Exception as e:
         logger.error(f"❌ Erreur chargement champion mapping: {e}")
 
 def get_champ_name(champ_id: int) -> str:
     return _champ_id_to_name.get(champ_id, "")
-
 
 # ──────────────────────────────────────────────────────────────
 # HELPERS
@@ -69,35 +77,150 @@ def extract_summoner_name(p: dict) -> str:
         return riot_id.split("#")[0]
     return (
         p.get("riotIdGameName") or
-        p.get("gameName") or
-        p.get("summonerName") or
+        p.get("gameName")       or
+        p.get("summonerName")   or
         ""
     )
 
-SMITE = 11
+# ──────────────────────────────────────────────────────────────
+# HISTORIQUE RÔLES (MATCH-V5)
+# ──────────────────────────────────────────────────────────────
 
+_role_history_cache: dict[str, tuple[str, float]] = {}
+ROLE_HISTORY_TTL = 600  # 10 minutes
 
-def build_teams(participants: list, pro_puuid_to_role: dict) -> tuple[list, list]:
-    """
-    Construit blue_team et red_team depuis les participants Spectator V5.
-    pro_puuid_to_role : { puuid: role } pour les pros connus en DB.
+REGION_TO_REGIONAL = {
+    "EUW":  "europe",
+    "EUW1": "europe",
+    "EUNE": "europe",
+    "KR":   "asia",
+    "JP":   "asia",
+    "NA":   "americas",
+    "NA1":  "americas",
+    "BR":   "americas",
+    "BR1":  "americas",
+    "LAN":  "americas",
+    "LAS":  "americas",
+    "OC":   "sea",
+    "OC1":  "sea",
+}
 
-    Rôle attribué par priorité :
-      1. pro_puuid_to_role (BDD ProPlayer) — source la plus fiable
-      2. assign_roles() basé sur les summoner spells — détection par équipe entière
-    """
+async def get_recent_role(puuid: str, region: str) -> str | None:
+    regional = REGION_TO_REGIONAL.get(region.upper(), "europe")
+    url      = f"https://{regional}.api.riotgames.com/lol/match/v5/matches/by-puuid/{puuid}/ids"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                url,
+                params  = {"count": 5, "queue": 420},
+                headers = {"X-Riot-Token": RIOT_API_KEY},
+            )
+            match_ids = resp.json()
+            if not match_ids or not isinstance(match_ids, list):
+                return None
+
+            role_counts: dict[str, int] = {}
+            for match_id in match_ids:
+                m    = await client.get(
+                    f"https://{regional}.api.riotgames.com/lol/match/v5/matches/{match_id}",
+                    headers={"X-Riot-Token": RIOT_API_KEY},
+                )
+                data = m.json()
+                for p in data.get("info", {}).get("participants", []):
+                    if p.get("puuid") == puuid:
+                        pos    = p.get("teamPosition") or p.get("individualPosition") or ""
+                        mapped = ROLE_MAP.get(pos.upper())
+                        if mapped:
+                            role_counts[mapped] = role_counts.get(mapped, 0) + 1
+                        break
+
+            if not role_counts:
+                return None
+            best = max(role_counts, key=role_counts.get)
+            logger.info(f"  📈 Historique {puuid[:8]}… → {role_counts} → {best}")
+            return best
+
+    except Exception as e:
+        logger.warning(f"get_recent_role {puuid[:8]}…: {e}")
+        return None
+
+async def get_cached_recent_role(puuid: str, region: str) -> str | None:
+    now = time.time()
+    if puuid in _role_history_cache:
+        role, ts = _role_history_cache[puuid]
+        if now - ts < ROLE_HISTORY_TTL:
+            return role
+    role = await get_recent_role(puuid, region)
+    if role:
+        _role_history_cache[puuid] = (role, now)
+    return role
+
+async def build_history_map(raw: list, region: str) -> dict[str, str]:
+    puuids  = [p.get("puuid") for p in raw if p.get("puuid")]
+    results = await asyncio.gather(
+        *[get_cached_recent_role(puuid, region) for puuid in puuids],
+        return_exceptions=True,
+    )
+    return {
+        puuid: role
+        for puuid, role in zip(puuids, results)
+        if isinstance(role, str)
+    }
+
+# ──────────────────────────────────────────────────────────────
+# BUILD TEAMS
+# ──────────────────────────────────────────────────────────────
+
+async def build_teams(
+    participants:      list,
+    pro_puuid_to_role: dict,
+    region:            str = "EUW",
+) -> tuple[list, list]:
+    if not participants:
+        return [], []
+
     blue_raw = [p for p in participants if p.get("teamId") == 100]
     red_raw  = [p for p in participants if p.get("teamId") == 200]
 
-    def build_side(raw: list) -> list:
-        spell_roles = assign_roles(raw)
-        result = []
-        for i, p in enumerate(raw):
+    if not blue_raw or not red_raw:
+        logger.warning(f"Teams invalides — blue={len(blue_raw)}, red={len(red_raw)}")
+        return [], []
+
+    blue_history, red_history = await asyncio.gather(
+        build_history_map(blue_raw, region),
+        build_history_map(red_raw,  region),
+    )
+
+    def build_side(raw: list, history_map: dict) -> list:
+        enriched = []
+        for p in raw:
             champ_id   = p.get("championId")
             champ_name = p.get("championName") or (get_champ_name(champ_id) if champ_id else "")
+            enriched.append({**p, "championName": champ_name})
+
+        try:
+            fallback_roles = assign_roles(
+                enriched,
+                champ_tag_map = _champ_name_to_tags,
+                history_map   = history_map,
+            )
+        except Exception as e:
+            logger.error(f"Erreur assign_roles: {e}", exc_info=True)
+            fallback_roles = []
+
+        result = []
+        for i, p in enumerate(enriched):
             puuid      = p.get("puuid") or ""
-            # Priorité : pro DB > détection par spells
-            role = pro_puuid_to_role.get(puuid) or spell_roles[i]
+            champ_name = p.get("championName") or "Unknown"
+            champ_id   = p.get("championId")
+
+            if pro_puuid_to_role.get(puuid):
+                role = pro_puuid_to_role[puuid]
+            elif i < len(fallback_roles) and fallback_roles[i]:
+                role = ROLE_MAP.get(fallback_roles[i].upper(), "FILL")
+            else:
+                role = "FILL"
+
             result.append({
                 "puuid":        puuid,
                 "summonerName": extract_summoner_name(p),
@@ -110,17 +233,16 @@ def build_teams(participants: list, pro_puuid_to_role: dict) -> tuple[list, list
             })
         return result
 
-    return build_side(blue_raw), build_side(red_raw)
+    return build_side(blue_raw, blue_history), build_side(red_raw, red_history)
 
 
 def patch_team(team: list, puuid_to_participant: dict, pro_puuid_to_role: dict) -> list:
-    """
-    Met à jour une équipe déjà en BDD avec les nouvelles données live
-    (summoner names, champion names, spells, rôles).
-    Recalcule les rôles via assign_roles() sur les données fraîches.
-    """
-    live_list   = [puuid_to_participant.get(p.get("puuid"), {}) for p in team]
-    spell_roles = assign_roles(live_list)
+    live_list = [puuid_to_participant.get(p.get("puuid"), {}) for p in team]
+    try:
+        spell_roles = assign_roles(live_list, champ_tag_map=_champ_name_to_tags)
+    except Exception as e:
+        logger.error(f"Erreur assign_roles (patch): {e}", exc_info=True)
+        spell_roles = []
 
     result = []
     for i, p in enumerate(team):
@@ -136,10 +258,10 @@ def patch_team(team: list, puuid_to_participant: dict, pro_puuid_to_role: dict) 
 
         if pro_puuid_to_role.get(puuid):
             role = pro_puuid_to_role[puuid]
-        elif live_p.get("spell1Id") is not None:
-            role = spell_roles[i]
+        elif i < len(spell_roles) and spell_roles[i]:
+            role = ROLE_MAP.get(spell_roles[i].upper(), "FILL")
         else:
-            role = p.get("role") or spell_roles[i]
+            role = p.get("role") or "FILL"
 
         result.append({
             **p,
@@ -157,7 +279,6 @@ def needs_patch(team: list) -> bool:
         not p.get("summonerName") or p.get("spell1Id") is None or not p.get("championName")
         for p in team
     )
-
 
 # ──────────────────────────────────────────────────────────────
 # NOTIFICATIONS FAVORIS
@@ -199,7 +320,6 @@ def notify_favorites_for_game(db: Session, pro: ProPlayer, new_game: LiveGame):
             ))
             logger.info(f"   🔔 Notif envoyée à user {fan.user_id} pour {searched_player.summoner_name}")
 
-
 # ──────────────────────────────────────────────────────────────
 # CALCUL CÔTES EN BACKGROUND
 # ──────────────────────────────────────────────────────────────
@@ -223,7 +343,6 @@ async def _compute_and_save_odds(game_id: int, blue_team: list, red_team: list, 
     finally:
         db.close()
 
-
 # ──────────────────────────────────────────────────────────────
 # RÉSOLUTION DES PARIS
 # ──────────────────────────────────────────────────────────────
@@ -236,7 +355,6 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
             logger.warning(f"resolve_bets: game {game_id} introuvable")
             return
 
-        # ── 5 tentatives espacées de 60s pour attendre MATCH-V5 ──
         result = None
         for attempt in range(5):
             logger.info(f"   🔍 Tentative {attempt + 1}/5 MATCH-V5 pour {riot_game_id}...")
@@ -255,7 +373,6 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
             logger.info(f"   ℹ️  Aucun pari pending pour game {game_id}")
             return
 
-        # ── MATCH-V5 indisponible → remboursement total ───────
         if not result:
             logger.error(f"   ❌ MATCH-V5 indisponible après 5 tentatives — remboursement")
             for bet in pending_bets:
@@ -264,23 +381,20 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
                 if user:
                     user.coins += bet.amount
                     db.add(Transaction(
-                        user_id=user.id,
-                        type="bet_refunded",
-                        amount=bet.amount,
+                        user_id=user.id, type="bet_refunded", amount=bet.amount,
                         description="Pari annulé (résultat indisponible) — remboursement",
                     ))
             db.commit()
             return
 
-        # ── Extraction des résultats ──────────────────────────
         winner_team       = result.get("winner_team")
         first_blood       = result.get("first_blood")
         first_tower_side  = result.get("first_tower_side")
         first_dragon_side = result.get("first_dragon_side")
         first_baron_side  = result.get("first_baron_side")
         duration_min      = result.get("duration_min", 0)
-        kda_positive      = result.get("kda_positive",    {})
-        player_stats      = result.get("player_stats",    {})
+        kda_positive      = result.get("kda_positive",     {})
+        player_stats      = result.get("player_stats",     {})
         top_damage_champ  = result.get("top_damage_champ", None)
         jungle_gap_side   = result.get("jungle_gap_side",  None)
 
@@ -291,81 +405,54 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
             f"top_dmg={top_damage_champ} | jg_gap={jungle_gap_side}"
         )
 
-        all_players = (game.blue_team or []) + (game.red_team or [])
-
-        puuid_by_champ: dict[str, str] = {
+        all_players    = (game.blue_team or []) + (game.red_team or [])
+        puuid_by_champ = {
             p.get("championName", "").lower(): p.get("puuid", "")
             for p in all_players
             if p.get("puuid") and p.get("championName")
         }
 
-        # ── Résolution pari par pari ──────────────────────────
         for bet in pending_bets:
-            slug = bet.bet_type_slug
-            won  = False
+            slug          = bet.bet_type_slug
+            won           = False
             refund_reason = None
 
             if slug == "who_wins":
                 won = (bet.bet_value == winner_team)
-
             elif slug == "first_blood":
                 won = bool(first_blood) and bet.bet_value.lower() == first_blood.lower()
-
             elif slug == "first_tower":
                 won = (bet.bet_value == first_tower_side)
-
             elif slug == "first_dragon":
                 won = (bet.bet_value == first_dragon_side)
-
             elif slug == "first_baron":
                 if first_baron_side is None:
                     refund_reason = "Aucun Baron dans cette partie"
                 else:
                     won = (bet.bet_value == first_baron_side)
-
             elif slug == "game_duration_under25":
                 won = duration_min < 25
-
             elif slug == "game_duration_25_35":
                 won = 25 <= duration_min <= 35
-
             elif slug == "game_duration_over35":
                 won = duration_min > 35
-
-            elif slug == "player_positive_kda":
+            elif slug in ("player_positive_kda", "champion_kda_over25", "champion_kda_over5", "champion_kda_over10"):
                 puuid = puuid_by_champ.get(bet.bet_value.lower())
-                if puuid:
+                if not puuid:
+                    refund_reason = f"Champion introuvable ({bet.bet_value})"
+                elif slug == "player_positive_kda":
                     won = kda_positive.get(puuid, False)
-                else:
-                    refund_reason = f"Champion introuvable ({bet.bet_value})"
-
-            elif slug == "champion_kda_over25":
-                puuid = puuid_by_champ.get(bet.bet_value.lower())
-                if puuid:
+                elif slug == "champion_kda_over25":
                     won = player_stats.get(puuid, {}).get("kda", 0) > 2.5
-                else:
-                    refund_reason = f"Champion introuvable ({bet.bet_value})"
-
-            elif slug == "champion_kda_over5":
-                puuid = puuid_by_champ.get(bet.bet_value.lower())
-                if puuid:
+                elif slug == "champion_kda_over5":
                     won = player_stats.get(puuid, {}).get("kda", 0) > 5.0
-                else:
-                    refund_reason = f"Champion introuvable ({bet.bet_value})"
-
-            elif slug == "champion_kda_over10":
-                puuid = puuid_by_champ.get(bet.bet_value.lower())
-                if puuid:
+                elif slug == "champion_kda_over10":
                     won = player_stats.get(puuid, {}).get("kda", 0) > 10.0
-                else:
-                    refund_reason = f"Champion introuvable ({bet.bet_value})"
-
             elif slug == "top_damage":
                 if top_damage_champ:
                     won = bet.bet_value.lower() == top_damage_champ.lower()
                 else:
                     refund_reason = "Données de dégâts indisponibles"
-
             elif slug == "jungle_gap":
                 if bet.bet_value == "none":
                     won = (jungle_gap_side is None)
@@ -373,26 +460,21 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
                     refund_reason = "Aucun Jungle Gap détecté dans cette partie"
                 else:
                     won = (bet.bet_value == jungle_gap_side)
-
             else:
                 refund_reason = f"Type de pari inconnu : {slug}"
 
-            # ── Remboursement ─────────────────────────────────
             if refund_reason:
                 bet.status = "cancelled"
                 user = db.query(User).filter(User.id == bet.user_id).with_for_update().first()
                 if user:
                     user.coins += bet.amount
                     db.add(Transaction(
-                        user_id=user.id,
-                        type="bet_refunded",
-                        amount=bet.amount,
+                        user_id=user.id, type="bet_refunded", amount=bet.amount,
                         description=f"Pari annulé — {refund_reason}",
                     ))
                 logger.info(f"   ↩️  Bet {bet.id} remboursé — {refund_reason}")
                 continue
 
-            # ── Gagné ─────────────────────────────────────────
             if won:
                 stored_odds = getattr(bet, "odds", None)
                 multiplier  = float(stored_odds) if stored_odds and float(stored_odds) > 1 else FIXED_ODDS.get(slug, 2.0)
@@ -404,14 +486,10 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
                 if user:
                     user.coins += payout
                     db.add(Transaction(
-                        user_id=user.id,
-                        type="bet_won",
-                        amount=payout,
+                        user_id=user.id, type="bet_won", amount=payout,
                         description=f"Pari gagné — {slug}: {bet.bet_value}",
                     ))
                 logger.info(f"   ✅ Bet {bet.id} GAGNÉ → +{payout} coins (×{multiplier:.2f})")
-
-            # ── Perdu ──────────────────────────────────────────
             else:
                 bet.status = "lost"
                 bet.payout = 0
@@ -425,7 +503,6 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
         db.rollback()
     finally:
         db.close()
-
 
 # ──────────────────────────────────────────────────────────────
 # POLL PRINCIPAL
@@ -456,7 +533,6 @@ async def poll_pro_games():
         for pro in pros:
             try:
                 live = await get_live_game_by_puuid(pro.riot_puuid, pro.region)
-
                 if not live:
                     await asyncio.sleep(1.5)
                     continue
@@ -478,7 +554,9 @@ async def poll_pro_games():
 
                 if not existing:
                     try:
-                        blue_team, red_team = build_teams(participants, pro_puuid_to_role)
+                        blue_team, red_team = await build_teams(
+                            participants, pro_puuid_to_role, region=pro.region
+                        )
 
                         if len(blue_team) < 3 or len(red_team) < 3:
                             logger.warning(f"   ⚠️ Game {riot_game_id} ignorée — teams invalides (blue={len(blue_team)}, red={len(red_team)})")
