@@ -406,6 +406,14 @@ async def _compute_and_save_odds(game_id: int, blue_team: list, red_team: list, 
 # ──────────────────────────────────────────────────────────────
 
 async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
+    """
+    Résout tous les paris pending d'une game.
+    Logique :
+      1. Tente de récupérer le résultat MATCH-V5 (jusqu'à 8 tentatives sur 15min).
+      2. Si trouvé → won/lost selon bet_type_slug.
+      3. Si non trouvé après tous les retries → cancelled + remboursement.
+      4. bet_value est NORMALISÉ en lowercase pour comparaison ("blue" / "red").
+    """
     db: Session = SessionLocal()
     try:
         game = db.query(LiveGame).filter(LiveGame.id == game_id).first()
@@ -413,14 +421,17 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
             logger.warning(f"resolve_bets: game {game_id} introuvable")
             return
 
+        # ── Retry MATCH-V5 — élargi à 8 tentatives, ~15min total ─
         result = None
-        for attempt in range(5):
-            logger.info(f"   🔍 Tentative {attempt + 1}/5 MATCH-V5 pour {riot_game_id}...")
+        RETRY_DELAYS = [10, 30, 60, 90, 120, 180, 240, 300]  # = 1020s = 17min
+        for attempt, delay in enumerate(RETRY_DELAYS):
+            logger.info(f"   🔍 Tentative {attempt + 1}/{len(RETRY_DELAYS)} MATCH-V5 pour {riot_game_id}...")
             result = await get_match_result("", riot_game_id, region)
             if result:
+                logger.info(f"   ✅ MATCH-V5 disponible dès la tentative {attempt + 1}")
                 break
-            if attempt < 4:
-                await asyncio.sleep(60)
+            if attempt < len(RETRY_DELAYS) - 1:
+                await asyncio.sleep(delay)
 
         pending_bets = db.query(Bet).filter(
             Bet.live_game_id == game_id,
@@ -431,8 +442,12 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
             logger.info(f"   ℹ️  Aucun pari pending pour game {game_id}")
             return
 
+        # ── Si pas de résultat → on rembourse, mais on log MASSIVEMENT ─
         if not result:
-            logger.error(f"   ❌ MATCH-V5 indisponible après 5 tentatives — remboursement")
+            logger.error(
+                f"   ❌ MATCH-V5 indisponible après {len(RETRY_DELAYS)} tentatives — "
+                f"game {game_id} riot_id={riot_game_id} region={region} → REMBOURSEMENT"
+            )
             for bet in pending_bets:
                 bet.status = "cancelled"
                 user = db.query(User).filter(User.id == bet.user_id).with_for_update().first()
@@ -440,95 +455,135 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
                     user.coins += bet.amount
                     db.add(Transaction(
                         user_id=user.id, type="bet_refunded", amount=bet.amount,
-                        description="Pari annulé (résultat indisponible) — remboursement",
+                        description=f"Pari annulé (MATCH-V5 timeout après 17min) — remboursement de {bet.amount}",
                     ))
+                logger.info(f"   ↩️  Bet {bet.id} remboursé ({bet.amount} coins)")
             db.commit()
             return
 
-        winner_team       = result.get("winner_team")
-        first_blood       = result.get("first_blood")
-        first_tower_side  = result.get("first_tower_side")
-        first_dragon_side = result.get("first_dragon_side")
-        first_baron_side  = result.get("first_baron_side")
+        # ── Résultat disponible ──────────────────────────────────
+        winner_team       = (result.get("winner_team")       or "").lower()
+        first_blood       = (result.get("first_blood")       or "").lower() if result.get("first_blood") else None
+        first_tower_side  = (result.get("first_tower_side")  or "").lower() if result.get("first_tower_side") else None
+        first_dragon_side = (result.get("first_dragon_side") or "").lower() if result.get("first_dragon_side") else None
+        first_baron_side  = (result.get("first_baron_side")  or "").lower() if result.get("first_baron_side") else None
         duration_min      = result.get("duration_min", 0)
         kda_positive      = result.get("kda_positive",     {})
         player_stats      = result.get("player_stats",     {})
         top_damage_champ  = result.get("top_damage_champ", None)
-        jungle_gap_side   = result.get("jungle_gap_side",  None)
+        jungle_gap_side   = (result.get("jungle_gap_side") or "").lower() if result.get("jungle_gap_side") else None
+
+        if not winner_team:
+            logger.error(f"   ❌ winner_team vide pour game {game_id} — REMBOURSEMENT")
+            for bet in pending_bets:
+                bet.status = "cancelled"
+                user = db.query(User).filter(User.id == bet.user_id).with_for_update().first()
+                if user:
+                    user.coins += bet.amount
+                    db.add(Transaction(
+                        user_id=user.id, type="bet_refunded", amount=bet.amount,
+                        description="Pari annulé (résultat ambigu) — remboursement",
+                    ))
+            db.commit()
+            return
 
         logger.info(
-            f"   🏆 winner={winner_team} | fb={first_blood} | "
-            f"tower={first_tower_side} | dragon={first_dragon_side} | "
-            f"baron={first_baron_side} | duration={duration_min:.1f}min | "
+            f"   🏆 winner={winner_team} | fb={first_blood} | tower={first_tower_side} | "
+            f"dragon={first_dragon_side} | baron={first_baron_side} | duration={duration_min:.1f}min | "
             f"top_dmg={top_damage_champ} | jg_gap={jungle_gap_side}"
         )
 
+        # Mapping puuid → champ pour les paris liés à un champion
         all_players    = (game.blue_team or []) + (game.red_team or [])
         puuid_by_champ = {}
+        champ_by_puuid = {}
         for p in all_players:
             puuid = p.get("puuid", "")
             if not puuid:
                 continue
             champ = p.get("championName", "")
-            # Fallback DDragon si championName vide ou Unknown
             if not champ or champ == "Unknown":
                 champ_id = p.get("championId")
                 if champ_id:
                     champ = get_champ_name(champ_id)
             if champ:
                 puuid_by_champ[champ.lower()] = puuid
+                champ_by_puuid[puuid] = champ
 
+        # ── Résolution pari par pari ─────────────────────────────
         for bet in pending_bets:
             slug          = bet.bet_type_slug
+            bet_value     = (bet.bet_value or "").lower().strip()
             won           = False
             refund_reason = None
 
             if slug == "who_wins":
-                won = (bet.bet_value == winner_team)
+                won = (bet_value == winner_team)
+
             elif slug == "first_blood":
-                won = bool(first_blood) and bet.bet_value.lower() == first_blood.lower()
+                if first_blood is None:
+                    refund_reason = "First blood non détecté dans cette partie"
+                else:
+                    won = (bet_value == first_blood)
+
             elif slug == "first_tower":
-                won = (bet.bet_value == first_tower_side)
+                if first_tower_side is None:
+                    refund_reason = "First tower non détectée"
+                else:
+                    won = (bet_value == first_tower_side)
+
             elif slug == "first_dragon":
-                won = (bet.bet_value == first_dragon_side)
+                if first_dragon_side is None:
+                    refund_reason = "First dragon non détecté"
+                else:
+                    won = (bet_value == first_dragon_side)
+
             elif slug == "first_baron":
                 if first_baron_side is None:
-                    refund_reason = "Aucun Baron dans cette partie"
+                    refund_reason = "First baron non détecté (game trop courte ?)"
                 else:
-                    won = (bet.bet_value == first_baron_side)
+                    won = (bet_value == first_baron_side)
+
             elif slug == "game_duration_under25":
-                won = duration_min < 25
+                won = (duration_min < 25)
             elif slug == "game_duration_25_35":
-                won = 25 <= duration_min <= 35
+                won = (25 <= duration_min < 35)
             elif slug == "game_duration_over35":
-                won = duration_min > 35
-            elif slug in ("player_positive_kda", "champion_kda_over25", "champion_kda_over5", "champion_kda_over10"):
-                puuid = puuid_by_champ.get(bet.bet_value.lower())
-                if not puuid:
-                    refund_reason = f"Champion introuvable ({bet.bet_value})"
-                elif slug == "player_positive_kda":
-                    won = kda_positive.get(puuid, False)
-                elif slug == "champion_kda_over25":
-                    won = player_stats.get(puuid, {}).get("kda", 0) > 2.5
-                elif slug == "champion_kda_over5":
-                    won = player_stats.get(puuid, {}).get("kda", 0) > 5.0
-                elif slug == "champion_kda_over10":
-                    won = player_stats.get(puuid, {}).get("kda", 0) > 10.0
+                won = (duration_min >= 35)
+
+            elif slug == "player_positive_kda":
+                target_puuid = puuid_by_champ.get(bet_value)
+                if not target_puuid:
+                    refund_reason = f"Champion {bet.bet_value} introuvable dans la partie"
+                else:
+                    won = bool(kda_positive.get(target_puuid, False))
+
+            elif slug in ("champion_kda_over25", "champion_kda_over5", "champion_kda_over10"):
+                threshold = {"champion_kda_over25": 2.5, "champion_kda_over5": 5.0, "champion_kda_over10": 10.0}[slug]
+                target_puuid = puuid_by_champ.get(bet_value)
+                if not target_puuid:
+                    refund_reason = f"Champion {bet.bet_value} introuvable"
+                else:
+                    stats = player_stats.get(target_puuid, {})
+                    kda   = stats.get("kda", 0)
+                    won   = (kda >= threshold)
+
             elif slug == "top_damage":
-                if top_damage_champ:
-                    won = bet.bet_value.lower() == top_damage_champ.lower()
+                if not top_damage_champ:
+                    refund_reason = "Top damage non détecté"
                 else:
-                    refund_reason = "Données de dégâts indisponibles"
+                    won = (bet_value == top_damage_champ.lower())
+
             elif slug == "jungle_gap":
-                if bet.bet_value == "none":
-                    won = (jungle_gap_side is None or jungle_gap_side == "none")
-                elif jungle_gap_side is None or jungle_gap_side == "none":
-                    refund_reason = "Aucun Jungle Gap détecté dans cette partie"
+                if jungle_gap_side is None or jungle_gap_side == "none":
+                    refund_reason = "Aucun Jungle Gap significatif détecté"
                 else:
-                    won = (bet.bet_value == jungle_gap_side)
+                    won = (bet_value == jungle_gap_side)
+
             else:
                 refund_reason = f"Type de pari inconnu : {slug}"
 
+            # ── Application du résultat ──────────────────────────
             if refund_reason:
                 bet.status = "cancelled"
                 user = db.query(User).filter(User.id == bet.user_id).with_for_update().first()
@@ -553,19 +608,19 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
                     user.coins += payout
                     db.add(Transaction(
                         user_id=user.id, type="bet_won", amount=payout,
-                        description=f"Pari gagné — {slug}: {bet.bet_value}",
+                        description=f"Pari gagné — {slug}: {bet.bet_value} (×{multiplier:.2f})",
                     ))
                 logger.info(f"   ✅ Bet {bet.id} GAGNÉ → +{payout} coins (×{multiplier:.2f})")
             else:
                 bet.status = "lost"
                 bet.payout = 0
-                logger.info(f"   ❌ Bet {bet.id} PERDU ({slug}: misait {bet.bet_value})")
+                logger.info(f"   ❌ Bet {bet.id} PERDU ({slug}: misait '{bet.bet_value}', réel='{winner_team}')")
 
         db.commit()
         logger.info(f"   ✅ {len(pending_bets)} pari(s) résolus pour game {game_id}")
 
     except Exception as e:
-        logger.error(f"   ❌ Erreur resolve_bets game {game_id}: {e}")
+        logger.error(f"   ❌ Erreur resolve_bets game {game_id}: {e}", exc_info=True)
         db.rollback()
     finally:
         db.close()

@@ -1,3 +1,23 @@
+"""
+services/role_detector.py
+Détection des rôles via algorithme Hongrois (méthode op.gg / u.gg).
+
+Principe :
+  1. Pour chaque (joueur, rôle), on calcule un COÛT (plus c'est bas, plus le
+     joueur est légitime à ce rôle).
+  2. On résout l'assignation optimale qui minimise la somme des coûts —
+     garantissant qu'on a exactement 1 joueur par rôle, sans doublon.
+  3. Override Smite : si un joueur a Smite, il est forcément jungler (coût ∞
+     partout sauf JUNGLE).
+
+Sources de signal :
+  - Tags du champion (DDragon)
+  - Summoner spells (Smite, TP, Heal, Exhaust, Ignite…)
+  - Historique récent du joueur (rôle le plus joué sur les 20 dernières games)
+  - Position en champ-select (les pros respectent l'ordre TOP-JGL-MID-BOT-SUP)
+
+Référence : Munkres / Hungarian assignment, scipy.optimize.linear_sum_assignment
+"""
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,122 +36,371 @@ ROLE_MAP = {
     "SUPPORT": SUPPORT,
 }
 
-CLEANSE, EXHAUST, FLASH, GHOST, HEAL, SMITE, TP, TP2, IGNITE, BARRIER = 1, 3, 4, 6, 7, 11, 12, 32, 14, 21
+# ─── Summoner Spell IDs ───────────────────────────────────────
+CLEANSE, EXHAUST, FLASH, GHOST, HEAL = 1, 3, 4, 6, 7
+SMITE, TP, IGNITE, BARRIER = 11, 12, 14, 21
+TP2 = 32  # Unleashed Teleport (rare, kept for safety)
+
+# ─── Coût "infini" (forçage)  ─────────────────────────────────
+INF = 10_000.0
+
+# ─── Champions hardcodés (override pour cas dégénérés) ────────
+# Les champions qui ne se jouent QUE dans certains rôles, peu importe le contexte
+HARD_ROLE_LOCKS: dict[str, set[str]] = {
+    # Junglers exclusifs
+    "Lee Sin":   {JUNGLE},
+    "Nidalee":   {JUNGLE},
+    "Kindred":   {JUNGLE},
+    "Kha'Zix":   {JUNGLE},
+    "Rek'Sai":   {JUNGLE},
+    "Ivern":     {JUNGLE},
+    "Karthus":   {JUNGLE, MID},
+    # ADC exclusifs
+    "Caitlyn":   {ADC},
+    "Jinx":      {ADC},
+    "Kog'Maw":   {ADC, MID},
+    "Tristana":  {ADC, MID},
+    "Twitch":    {ADC},
+    "Aphelios":  {ADC},
+    "Zeri":      {ADC},
+    # Support exclusifs (vraiment)
+    "Soraka":    {SUPPORT, TOP},
+    "Janna":     {SUPPORT},
+    "Lulu":      {SUPPORT, MID},
+    "Nami":      {SUPPORT},
+    "Yuumi":     {SUPPORT},
+    "Bard":      {SUPPORT},
+    # Tops exclusifs
+    "Ornn":      {TOP},
+    "Mundo":     {TOP, JUNGLE},
+    "Dr. Mundo": {TOP, JUNGLE},
+}
 
 
-def _role_scores(
-    p: dict,
-    champ_tags: list[str] = [],
-    history_role: str | None = None,
-) -> dict[str, float]:
-    sp     = {p.get("spell1Id"), p.get("spell2Id")} - {None}
-    scores = {role: 0.0 for role in ROLE_ORDER}
+def _spell_set(p: dict) -> set[int]:
+    return {p.get("spell1Id"), p.get("spell2Id")} - {None}
 
-    # ── Score de base par tag ─────────────────────────────────
-    if "Marksman" in champ_tags:
-        scores[ADC] += 15.0
-    if "Support" in champ_tags and "Fighter" not in champ_tags and "Mage" not in champ_tags:
-        scores[SUPPORT] += 15.0
-    if "Support" in champ_tags and "Mage" in champ_tags:
-        scores[SUPPORT] += 10.0
-        scores[MID]     +=  5.0
-    if "Fighter" in champ_tags and "Assassin" not in champ_tags:
-        scores[TOP]    += 10.0
-        scores[JUNGLE] +=  5.0
-    if "Fighter" in champ_tags and "Assassin" in champ_tags:
-        scores[JUNGLE] += 8.0
-        scores[TOP]    += 6.0
-        scores[MID]    += 4.0
-    if "Tank" in champ_tags and "Fighter" not in champ_tags:
-        scores[SUPPORT] += 8.0
-        scores[TOP]     += 6.0
-    if "Assassin" in champ_tags and "Fighter" not in champ_tags:
-        scores[MID]    += 10.0
-        scores[JUNGLE] +=  7.0
-    if "Mage" in champ_tags and "Support" not in champ_tags:
-        scores[MID] += 12.0
 
-    # ── Summoner Spells ───────────────────────────────────────
-    if SMITE in sp:
-        scores[JUNGLE] += 100.0
+def _base_cost_from_tags(champ: str, champ_tags: list[str]) -> dict[str, float]:
+    """
+    Coût de base par rôle, dérivé des tags du champion.
+    Plus le coût est bas, plus le rôle est naturel pour ce champion.
+    Échelle : [0, 100]
+    """
+    cost = {role: 50.0 for role in ROLE_ORDER}
 
-    if EXHAUST in sp:
-        scores[SUPPORT] += 30.0
-        scores[ADC]     +=  2.0
-
-    if BARRIER in sp or CLEANSE in sp:
-        scores[MID] += 10.0
-        scores[ADC] +=  8.0
-
-    if HEAL in sp:
-        if "Marksman" in champ_tags:
-            scores[ADC]     += 40.0
-        elif "Support" in champ_tags:
-            scores[SUPPORT] += 40.0
-        else:
-            scores[ADC]     += 20.0
-            scores[SUPPORT] += 15.0
-
-    if TP in sp or TP2 in sp:
-        if "Fighter" in champ_tags or "Tank" in champ_tags:
-            scores[TOP] += 25.0
-        elif "Mage" in champ_tags and "Support" not in champ_tags:
-            scores[MID] += 20.0
-        elif "Support" in champ_tags:
-            scores[SUPPORT] += 10.0
-            scores[MID]     +=  5.0
-        else:
-            scores[TOP] += 15.0
-            scores[MID] +=  5.0
-
-    if GHOST in sp:
-        if "Marksman" in champ_tags:
-            scores[ADC] += 20.0
-        elif "Fighter" in champ_tags or "Tank" in champ_tags:
-            scores[TOP] += 15.0
-        else:
-            scores[ADC] += 8.0
-            scores[TOP] += 6.0
-
-    if IGNITE in sp:
-        if "Support" in champ_tags and "Fighter" not in champ_tags:
-            scores[SUPPORT] += 15.0
-        elif "Mage" in champ_tags or "Assassin" in champ_tags:
-            scores[MID]     += 15.0
-        elif "Fighter" in champ_tags:
-            scores[TOP]     += 12.0
-        else:
-            scores[SUPPORT] += 5.0
-            scores[MID]     += 8.0
-            scores[TOP]     += 4.0
-
-    # ── Boost historique ─────────────────────────────────────
-    if history_role and history_role in scores:
-        scores[history_role] += 20.0
-
-    # ── Plancher asymétrique ──────────────────────────────────
     is_marksman = "Marksman" in champ_tags
-    is_support  = "Support" in champ_tags and "Fighter" not in champ_tags
+    is_support  = "Support"  in champ_tags
+    is_fighter  = "Fighter"  in champ_tags
+    is_tank     = "Tank"     in champ_tags
+    is_assassin = "Assassin" in champ_tags
+    is_mage     = "Mage"     in champ_tags
 
-    if scores[ADC] < 2.0 and not is_marksman:
-        scores[ADC] = 0.1
-    if scores[SUPPORT] < 2.0 and not is_support:
-        scores[SUPPORT] = 0.1
-    if scores[TOP] < 1.0:
-        scores[TOP] = 1.0
-    if scores[MID] < 1.0:
-        scores[MID] = 1.0
-    if scores[JUNGLE] < 0.5:
-        scores[JUNGLE] = 0.5
+    # Marksman → ADC très naturel, autres très coûteux
+    if is_marksman:
+        cost[ADC]     = 5.0
+        cost[MID]     = 60.0
+        cost[TOP]     = 80.0
+        cost[JUNGLE]  = 85.0
+        cost[SUPPORT] = 70.0
 
-    champ_name = p.get("championName", "?")
-    hist_str   = f" [hist:{history_role}]" if history_role else ""
-    print(
-        f"  📊 {champ_name:15s}{hist_str} | spells={sorted(sp)} | tags={champ_tags} | "
-        f"scores={{ {', '.join(f'{r}:{v:.0f}' for r, v in scores.items())} }}"
-    )
+    # Support pur (avec tag Support et pas Fighter/Mage offensif)
+    if is_support and not is_fighter and not is_assassin:
+        cost[SUPPORT] = 8.0
+        cost[TOP]     = 70.0
+        cost[JUNGLE]  = 75.0
+        cost[MID]     = 55.0 if is_mage else 70.0
+        cost[ADC]     = 80.0
 
-    return scores
+    # Mage classique → Mid
+    if is_mage and not is_support:
+        cost[MID]     = 15.0
+        cost[TOP]     = 45.0
+        cost[SUPPORT] = 55.0
+        cost[ADC]     = 70.0
+        cost[JUNGLE]  = 65.0
+
+    # Assassin → Mid > Jungle
+    if is_assassin and not is_fighter:
+        cost[MID]     = 18.0
+        cost[JUNGLE]  = 25.0
+        cost[TOP]     = 45.0
+        cost[ADC]     = 75.0
+        cost[SUPPORT] = 80.0
+
+    # Fighter pur → Top, fallback Jungle
+    if is_fighter and not is_assassin and not is_marksman:
+        cost[TOP]     = 18.0
+        cost[JUNGLE]  = 30.0
+        cost[MID]     = 45.0
+        cost[SUPPORT] = 65.0
+        cost[ADC]     = 75.0
+
+    # Fighter+Assassin (bruisers / divers) → Jungle / Top
+    if is_fighter and is_assassin:
+        cost[JUNGLE]  = 22.0
+        cost[TOP]     = 25.0
+        cost[MID]     = 40.0
+        cost[ADC]     = 70.0
+        cost[SUPPORT] = 75.0
+
+    # Tank pur → Top / Support
+    if is_tank and not is_fighter:
+        cost[TOP]     = 22.0
+        cost[SUPPORT] = 25.0
+        cost[JUNGLE]  = 35.0
+        cost[MID]     = 60.0
+        cost[ADC]     = 80.0
+
+    # Hard locks (override total)
+    if champ in HARD_ROLE_LOCKS:
+        allowed = HARD_ROLE_LOCKS[champ]
+        for role in ROLE_ORDER:
+            if role not in allowed:
+                cost[role] = max(cost[role], 90.0)
+            else:
+                cost[role] = min(cost[role], 15.0)
+
+    return cost
+
+
+def _adjust_cost_with_spells(cost: dict[str, float], spells: set[int], champ_tags: list[str]) -> dict[str, float]:
+    """
+    Ajuste les coûts selon les summoner spells. Le signal le plus fort = Smite.
+    """
+    is_marksman = "Marksman" in champ_tags
+    is_support  = "Support"  in champ_tags
+    is_fighter  = "Fighter"  in champ_tags
+    is_tank     = "Tank"     in champ_tags
+
+    # ── SMITE = jungler, lock dur ─────────────────────────────
+    # On ne met pas INF partout, car certains modes spéciaux permettent Smite ailleurs,
+    # mais on rend les autres rôles très chers.
+    if SMITE in spells:
+        for role in ROLE_ORDER:
+            cost[role] = INF if role != JUNGLE else 1.0
+        return cost
+
+    # ── HEAL = ADC ou support, presque jamais ailleurs ───────
+    if HEAL in spells:
+        if is_marksman:
+            cost[ADC]     = max(0.0, cost[ADC] - 30.0)
+        elif is_support:
+            cost[SUPPORT] = max(0.0, cost[SUPPORT] - 30.0)
+        else:
+            cost[ADC]     -= 15.0
+            cost[SUPPORT] -= 10.0
+        cost[TOP]    += 25.0
+        cost[JUNGLE] += 30.0
+        cost[MID]    += 20.0
+
+    # ── EXHAUST = très majoritairement support ───────────────
+    if EXHAUST in spells:
+        cost[SUPPORT] -= 25.0
+        cost[ADC]     -= 5.0
+        cost[TOP]     += 15.0
+        cost[JUNGLE]  += 25.0
+        cost[MID]     += 10.0
+
+    # ── TP = top en grande majorité, sinon mid (rare) ────────
+    if TP in spells or TP2 in spells:
+        if is_fighter or is_tank:
+            cost[TOP] -= 25.0
+            cost[JUNGLE] += 20.0
+        else:
+            cost[TOP] -= 15.0
+            cost[MID] -= 5.0
+        cost[SUPPORT] += 15.0
+        cost[ADC]     += 25.0  # ADC ne prend presque jamais TP
+
+    # ── IGNITE = mid/top/support agressif ────────────────────
+    if IGNITE in spells:
+        if is_support:
+            cost[SUPPORT] -= 10.0
+        else:
+            cost[MID] -= 8.0
+            cost[TOP] -= 6.0
+
+    # ── BARRIER / CLEANSE = mid ou ADC ───────────────────────
+    if BARRIER in spells or CLEANSE in spells:
+        cost[MID] -= 10.0
+        cost[ADC] -= 8.0
+        cost[JUNGLE] += 15.0
+        cost[SUPPORT] += 10.0
+
+    # ── GHOST = top ou ADC selon champ ───────────────────────
+    if GHOST in spells:
+        if is_marksman:
+            cost[ADC] -= 12.0
+        else:
+            cost[TOP] -= 10.0
+
+    return cost
+
+
+def _adjust_cost_with_history(cost: dict[str, float], history_role: str | None) -> dict[str, float]:
+    """
+    Si l'historique du joueur indique un main role, on baisse le coût pour ce rôle.
+    Signal modéré (les joueurs flexent souvent).
+    """
+    if not history_role or history_role not in ROLE_ORDER:
+        return cost
+    cost[history_role] -= 8.0
+    return cost
+
+
+def _adjust_cost_with_position(cost: dict[str, float], position_idx: int | None) -> dict[str, float]:
+    """
+    En soloQ, l'ordre champ-select est ALÉATOIRE (par tour de pick).
+    En tournoi/clash, l'ordre est souvent TOP-JGL-MID-BOT-SUP.
+    On applique un BIAIS TRÈS LÉGER (0.5 par rôle) — sert de tiebreaker uniquement.
+    """
+    if position_idx is None or position_idx < 0 or position_idx >= len(ROLE_ORDER):
+        return cost
+    expected = ROLE_ORDER[position_idx]
+    cost[expected] -= 0.5
+    return cost
+
+
+def _hungarian(cost_matrix: list[list[float]]) -> list[int]:
+    """
+    Algorithme Hongrois (Munkres). Implémentation pure Python pour éviter scipy.
+    Retourne pour chaque ligne (joueur) l'indice de colonne (rôle) assigné.
+
+    Complexité : O(n³). Pour n=5 : trivial.
+    Ref : https://en.wikipedia.org/wiki/Hungarian_algorithm
+    """
+    n = len(cost_matrix)
+    if n == 0:
+        return []
+    m = len(cost_matrix[0])
+    if n != m:
+        raise ValueError(f"Matrice non carrée : {n}x{m}")
+
+    # Copie pour ne pas modifier l'entrée
+    c = [row[:] for row in cost_matrix]
+
+    # Step 1 : réduction par ligne
+    for i in range(n):
+        row_min = min(c[i])
+        for j in range(n):
+            c[i][j] -= row_min
+
+    # Step 2 : réduction par colonne
+    for j in range(n):
+        col_min = min(c[i][j] for i in range(n))
+        for i in range(n):
+            c[i][j] -= col_min
+
+    # Boucle principale : on cherche un assignment complet par les zéros
+    def try_assign() -> list[int]:
+        """Tente une assignation gloutonne sur les zéros. Retourne [-1]*n si échec."""
+        assigned_col = [-1] * n
+        assigned_row = [-1] * n
+
+        for i in range(n):
+            zeros = [j for j in range(n) if c[i][j] == 0 and assigned_row[j] == -1]
+            if len(zeros) == 1:
+                assigned_col[i]    = zeros[0]
+                assigned_row[zeros[0]] = i
+
+        # Compléter avec backtracking simple sur les lignes restantes
+        unassigned = [i for i in range(n) if assigned_col[i] == -1]
+
+        def bt(idx: int) -> bool:
+            if idx >= len(unassigned):
+                return True
+            i = unassigned[idx]
+            for j in range(n):
+                if c[i][j] == 0 and assigned_row[j] == -1:
+                    assigned_col[i]   = j
+                    assigned_row[j]   = i
+                    if bt(idx + 1):
+                        return True
+                    assigned_col[i]   = -1
+                    assigned_row[j]   = -1
+            return False
+
+        if bt(0):
+            return assigned_col
+        return [-1] * n
+
+    for _ in range(50):  # garde-fou — converge en pratique en quelques itérations
+        result = try_assign()
+        if all(r != -1 for r in result):
+            return result
+
+        # Cover des zéros et trouver le min non couvert
+        covered_rows = set()
+        covered_cols = set()
+
+        # Marquage des lignes non assignées
+        for i in range(n):
+            if result[i] == -1:
+                covered_rows.add(i)
+
+        changed = True
+        while changed:
+            changed = False
+            # Marquer les colonnes ayant un zéro dans une ligne marquée
+            for i in list(covered_rows):
+                for j in range(n):
+                    if c[i][j] == 0 and j not in covered_cols:
+                        covered_cols.add(j)
+                        changed = True
+            # Marquer les lignes ayant une assignation dans une colonne marquée
+            for j in list(covered_cols):
+                for i in range(n):
+                    if result[i] == j and i not in covered_rows:
+                        covered_rows.add(i)
+                        changed = True
+
+        # Le cover effectif = lignes NON marquées + colonnes marquées
+        effective_rows = set(range(n)) - covered_rows
+        effective_cols = covered_cols
+
+        # Min non couvert
+        min_uncovered = INF
+        for i in range(n):
+            if i in effective_rows:
+                continue
+            for j in range(n):
+                if j in effective_cols:
+                    continue
+                if c[i][j] < min_uncovered:
+                    min_uncovered = c[i][j]
+
+        if min_uncovered == INF:
+            break
+
+        # Soustraction au non couvert, addition au double couvert
+        for i in range(n):
+            for j in range(n):
+                row_covered = i not in effective_rows
+                col_covered = j in effective_cols
+                if not row_covered and not col_covered:
+                    c[i][j] -= min_uncovered
+                elif row_covered and col_covered:
+                    c[i][j] += min_uncovered
+
+    # Fallback : assignation gloutonne par coût croissant
+    return _greedy_assign(cost_matrix)
+
+
+def _greedy_assign(cost_matrix: list[list[float]]) -> list[int]:
+    """Fallback : assigne ligne par ligne au plus bas coût restant."""
+    n = len(cost_matrix)
+    result = [-1] * n
+    used_cols: set[int] = set()
+    pairs = [(cost_matrix[i][j], i, j) for i in range(n) for j in range(n)]
+    pairs.sort()
+    for _, i, j in pairs:
+        if result[i] == -1 and j not in used_cols:
+            result[i] = j
+            used_cols.add(j)
+            if len(used_cols) == n:
+                break
+    return result
 
 
 def assign_roles(
@@ -139,41 +408,53 @@ def assign_roles(
     champ_tag_map: dict[str, list] = {},
     history_map:   dict[str, str]  = {},
 ) -> list[str]:
+    """
+    Point d'entrée principal. Retourne pour chaque joueur de l'équipe le rôle assigné.
+
+    Args:
+        team:           liste des participants (dicts avec championName, spell1Id, spell2Id, puuid)
+        champ_tag_map:  { championName: [tags] } — DDragon
+        history_map:    { puuid: role_principal_recent } — DB
+    """
     n = len(team)
     if n == 0:
         return []
+    if n != 5:
+        logger.warning(f"assign_roles: équipe à {n} joueurs (attendu 5), fallback ROLE_ORDER")
+        return ROLE_ORDER[:n]
 
-    print("🎯 assign_roles — début")
+    # ── Construction de la matrice de coût ────────────────────
+    cost_matrix: list[list[float]] = []
+    debug_rows = []
 
-    score_matrix = [
-        _role_scores(
-            p,
-            champ_tags   = champ_tag_map.get(p.get("championName", ""), []),
-            history_role = history_map.get(p.get("puuid", "")),
-        )
-        for p in team
-    ]
+    for idx, p in enumerate(team):
+        champ  = p.get("championName", "")
+        tags   = champ_tag_map.get(champ, [])
+        spells = _spell_set(p)
+        hist   = history_map.get(p.get("puuid", ""))
 
-    roles_to_assign = ROLE_ORDER[:n]
-    best_score      = -1.0
-    best_assignment: list[str] = []
+        cost = _base_cost_from_tags(champ, tags)
+        cost = _adjust_cost_with_spells(cost, spells, tags)
+        cost = _adjust_cost_with_history(cost, hist)
+        cost = _adjust_cost_with_position(cost, idx)
 
-    def backtrack(idx, current_roles, current_score, current_assignment):
-        nonlocal best_score, best_assignment
-        if idx == n:
-            if current_score > best_score:
-                best_score      = current_score
-                best_assignment = list(current_assignment)
-            return
-        for i, role in enumerate(current_roles):
-            remaining = current_roles[:i] + current_roles[i+1:]
-            current_assignment.append(role)
-            backtrack(idx + 1, remaining, current_score + score_matrix[idx][role], current_assignment)
-            current_assignment.pop()
+        cost_matrix.append([cost[role] for role in ROLE_ORDER])
+        debug_rows.append((champ, tags, spells, hist, cost))
 
-    backtrack(0, roles_to_assign, 0.0, [])
+    # ── Résolution Hongrois ──────────────────────────────────
+    try:
+        col_assignment = _hungarian(cost_matrix)
+    except Exception as e:
+        logger.error(f"assign_roles: Hongrois failed ({e}), fallback greedy")
+        col_assignment = _greedy_assign(cost_matrix)
 
-    result = list(zip([p.get("championName", "?") for p in team], best_assignment))
-    print(f"✅ assign_roles — résultat: {result} (score={best_score:.1f})")
+    result = [ROLE_ORDER[col] if 0 <= col < len(ROLE_ORDER) else "FILL" for col in col_assignment]
 
-    return best_assignment
+    # ── Logs ──────────────────────────────────────────────────
+    logger.info("🎯 assign_roles (Hungarian) — résultat:")
+    for (champ, tags, spells, hist, cost), role in zip(debug_rows, result):
+        cost_str = " ".join(f"{r}:{cost[r]:.0f}" for r in ROLE_ORDER)
+        hist_str = f" hist:{hist}" if hist else ""
+        logger.info(f"   {champ:15s} → {role:8s} | spells={sorted(spells)} | {cost_str}{hist_str}")
+
+    return result

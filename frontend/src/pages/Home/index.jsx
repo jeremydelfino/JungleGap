@@ -113,14 +113,14 @@ export default function Home() {
 
       {/* ─── HERO ─── */}
       <div className="hero">
-        <div className="hero-eyebrow">Paris virtuels · League of Legends</div>
+        <div className="hero-eyebrow">Paris fictifs · League of Legends</div>
         <h1 className="hero-title">
           Parie sur les<br />
           <span className="accent">parties en direct</span>
         </h1>
         <p className="hero-sub">
           Recherche un joueur, regarde sa partie live<br />
-          et mise tes coins virtuels
+          et mise tes coins
         </p>
 
         <div className="search-wrap" onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}>

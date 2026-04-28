@@ -237,6 +237,10 @@ def parse_actual_score(t1_wins: int, t2_wins: int) -> tuple[str, str]:
 # ─── Résolution des paris ─────────────────────────────────────
 
 def resolve_match(match_id: str, db: Session):
+    """
+    Résolution effective d'un match esports.
+    Compare bet_value avec actual_winner en NORMALISANT la casse.
+    """
     bets = db.query(EsportsBet).filter(
         EsportsBet.match_id == match_id,
         EsportsBet.status   == "pending",
@@ -245,27 +249,37 @@ def resolve_match(match_id: str, db: Session):
         return
 
     sample        = bets[0]
-    actual_winner = sample.actual_winner
-    actual_score  = sample.actual_score
+    actual_winner = (sample.actual_winner or "").lower().strip()
+    actual_score  = (sample.actual_score  or "").strip()
+
     if not actual_winner:
+        logger.warning(f"[resolve_match] {match_id}: actual_winner vide, abort")
         return
 
     for bet in bets:
         user = db.query(User).filter(User.id == bet.user_id).first()
         if not user:
+            logger.warning(f"[resolve_match] bet {bet.id}: user introuvable")
             continue
 
-        won = False
+        bet_value = (bet.bet_value or "").lower().strip()
+        won       = False
+
         if bet.bet_type == "match_winner":
-            won = (bet.bet_value == actual_winner)
+            won = (bet_value == actual_winner)
+
         elif bet.bet_type == "exact_score":
-            parts      = bet.bet_value.split("_", 1)
+            parts      = bet_value.split("_", 1)
             bet_winner = parts[0]
             bet_score  = parts[1] if len(parts) > 1 else ""
             won        = (bet_winner == actual_winner and bet_score == actual_score)
 
+        else:
+            logger.warning(f"[resolve_match] bet {bet.id}: type inconnu '{bet.bet_type}', skip")
+            continue
+
         if won:
-            payout       = math.floor(bet.amount * bet.odds)
+            payout       = math.floor(bet.amount * (bet.odds or 2.0))
             bet.payout   = payout
             bet.status   = "won"
             user.coins  += payout
@@ -273,11 +287,13 @@ def resolve_match(match_id: str, db: Session):
                 user_id=user.id,
                 type="bet_won",
                 amount=payout,
-                description=f"Esports gagné — {sample.team1_code} vs {sample.team2_code}",
+                description=f"Esports gagné — {sample.team1_code} vs {sample.team2_code} ({bet.bet_value})",
             ))
+            logger.info(f"[resolve_match] bet {bet.id}: ✅ WON +{payout} (mise {bet.amount}, odds {bet.odds})")
         else:
             bet.payout = 0
             bet.status = "lost"
+            logger.info(f"[resolve_match] bet {bet.id}: ❌ LOST (misait '{bet.bet_value}', gagnant='{actual_winner}')")
 
         bet.resolved_at = datetime.utcnow()
 
@@ -736,8 +752,16 @@ def get_my_esports_bets(
 
 
 async def resolve_completed_matches(db: Session):
+    """
+    Parcourt tous les completed events de toutes les ligues et résout les paris pending.
+    Robuste aux cas dégénérés : forfait (gameWins=0-0 + outcome="win"), match annulé, etc.
+    """
     import logging
     logger = logging.getLogger(__name__)
+
+    total_resolved = 0
+    total_skipped  = 0
+    total_errors   = 0
 
     for slug, lid in COVERED_LEAGUES.items():
         try:
@@ -746,13 +770,13 @@ async def resolve_completed_matches(db: Session):
                 logger.warning(f"[resolve] {slug}: pas de tournament_id, skip")
                 continue
 
-            logger.info(f"[resolve] {slug}: tournament_id={tid}")
             ce     = await lolesports.get_completed_events(tid)
             events = ce.get("data", {}).get("schedule", {}).get("events", [])
-            logger.info(f"[resolve] {slug}: {len(events)} completed events")
+            logger.info(f"[resolve] {slug}: tournament_id={tid}, {len(events)} completed events")
 
         except Exception as e:
             logger.error(f"[resolve] {slug}: erreur API — {e}")
+            total_errors += 1
             continue
 
         for ev in events:
@@ -761,52 +785,78 @@ async def resolve_completed_matches(db: Session):
 
             match    = ev.get("match", {})
             match_id = match.get("id", "")
-            teams    = match.get("teams", [])
+            if not match_id:
+                continue
+
+            teams = match.get("teams", [])
             if len(teams) < 2:
                 continue
 
-            # Vérifier s'il y a des paris pending pour ce match
-            pending = db.query(EsportsBet).filter(
+            # Y a-t-il des paris pending pour ce match ?
+            pending_count = db.query(EsportsBet).filter(
                 EsportsBet.match_id == match_id,
                 EsportsBet.status   == "pending",
-            ).first()
-            if not pending:
+            ).count()
+            if pending_count == 0:
                 continue
 
-            logger.info(f"[resolve] match {match_id} a des paris pending — tentative de résolution")
+            logger.info(f"[resolve] match {match_id} a {pending_count} pari(s) pending — résolution")
 
-            t1, t2  = teams[0], teams[1]
-            t1_wins = (t1.get("result") or {}).get("gameWins", 0)
-            t2_wins = (t2.get("result") or {}).get("gameWins", 0)
+            t1, t2     = teams[0], teams[1]
+            r1         = t1.get("result") or {}
+            r2         = t2.get("result") or {}
+            t1_wins    = r1.get("gameWins", 0) or 0
+            t2_wins    = r2.get("gameWins", 0) or 0
+            t1_outcome = (r1.get("outcome") or "").lower()
+            t2_outcome = (r2.get("outcome") or "").lower()
 
-            # Fallback : utiliser l'outcome si gameWins = 0-0
-            if t1_wins == 0 and t2_wins == 0:
-                t1_outcome = (t1.get("result") or {}).get("outcome", "")
-                t2_outcome = (t2.get("result") or {}).get("outcome", "")
-                logger.warning(f"[resolve] match {match_id}: gameWins=0-0, outcomes: {t1_outcome}/{t2_outcome}")
+            winner = None
+            score  = None
 
-                if t1_outcome == "win":
-                    winner = "team1"
-                    score  = "1-0"
-                elif t2_outcome == "win":
-                    winner = "team2"
-                    score  = "1-0"
-                else:
-                    logger.error(f"[resolve] match {match_id}: impossible de déterminer le gagnant, skip")
-                    continue
-            else:
+            # ── CAS 1 : gameWins valide (cas normal) ────────────
+            if t1_wins > 0 or t2_wins > 0:
                 winner, score = parse_actual_score(t1_wins, t2_wins)
 
-            logger.info(f"[resolve] match {match_id}: winner={winner}, score={score} — résolution en cours")
+            # ── CAS 2 : forfait / WO / 1-0 sans gameWins ───────
+            elif t1_outcome == "win" and t2_outcome == "loss":
+                winner, score = "team1", "1-0"
+            elif t2_outcome == "win" and t1_outcome == "loss":
+                winner, score = "team2", "1-0"
 
+            # ── CAS 3 : outcome flou — on attend ───────────────
+            else:
+                logger.warning(
+                    f"[resolve] match {match_id}: gameWins=0-0 et outcomes={t1_outcome}/{t2_outcome} "
+                    f"— ambiguous, skip (réessai au prochain cycle)"
+                )
+                total_skipped += 1
+                continue
+
+            logger.info(f"[resolve] match {match_id}: winner={winner}, score={score}")
+
+            # Update tous les paris pending de ce match avec le résultat
             db.query(EsportsBet).filter(
                 EsportsBet.match_id == match_id,
                 EsportsBet.status   == "pending",
-            ).update({"actual_winner": winner, "actual_score": score})
+            ).update({
+                "actual_winner": winner,
+                "actual_score":  score,
+            })
             db.commit()
-            resolve_match(match_id, db)
-            logger.info(f"[resolve] match {match_id}: ✅ résolu")
 
+            # Déclenche la résolution effective
+            try:
+                resolve_match(match_id, db)
+                total_resolved += 1
+                logger.info(f"[resolve] match {match_id}: ✅ résolu")
+            except Exception as e:
+                logger.error(f"[resolve] match {match_id}: erreur lors du resolve — {e}")
+                total_errors += 1
+
+    logger.info(
+        f"[resolve] BILAN — résolus: {total_resolved} | skip ambigus: {total_skipped} | "
+        f"erreurs: {total_errors}"
+    )
 
 class PlaceEsportsBetSchema(BaseModel):
     match_id:  str
