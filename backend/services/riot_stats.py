@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # ─── Cache en mémoire ────────────────────────────────────────
 _STATS_CACHE: dict = {}
 CACHE_TTL_MINUTES = 30
-N_GAMES = 20
+N_GAMES = 10
 
 # Queues à essayer dans l'ordre : ranked solo → ranked flex → toutes les queues classées
 QUEUE_FALLBACKS = [420, 440, None]   # None = pas de filtre queue
@@ -94,19 +94,25 @@ async def _fetch_match_ids(puuid: str, region: str, count: int = N_GAMES) -> tup
 
 async def _fetch_match(match_id: str, routing: str) -> dict | None:
     url = f"https://{routing}.api.riotgames.com/lol/match/v5/matches/{match_id}"
-    try:
-        async with httpx.AsyncClient(timeout=10) as c:
-            async with riot_limiter:
-                r = await c.get(url, headers=get_headers())
-                if r.status_code == 200:
-                    return r.json()
-                if r.status_code in (401, 403, 429):
-                    logger.warning(f"⚠️  _fetch_match {match_id}: HTTP {r.status_code}")
-                return None
-    except Exception as e:
-        logger.error(f"_fetch_match error {match_id}: {e}")
-        return None
-
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=10) as c:
+                async with riot_limiter:
+                    r = await c.get(url, headers=get_headers())
+                    if r.status_code == 200:
+                        return r.json()
+                    if r.status_code == 429 and attempt == 0:
+                        retry_after = int(r.headers.get("Retry-After", 5))
+                        logger.warning(f"⏱️  _fetch_match {match_id} 429, retry dans {retry_after}s")
+                        await asyncio.sleep(retry_after)
+                        continue
+                    if r.status_code in (401, 403, 429):
+                        logger.warning(f"⚠️  _fetch_match {match_id}: HTTP {r.status_code}")
+                    return None
+        except Exception as e:
+            logger.error(f"_fetch_match error {match_id}: {e}")
+            return None
+    return None
 
 async def get_player_stats(puuid: str, region: str, current_champ: str | None = None) -> dict:
     """

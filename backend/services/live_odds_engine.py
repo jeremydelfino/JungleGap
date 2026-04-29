@@ -260,7 +260,12 @@ async def _team_score(team: list[dict], region: str) -> tuple[float, dict]:
         else:
             tasks.append(_default_stats_coro())
 
-    stats_list = await asyncio.gather(*tasks, return_exceptions=True)
+    stats_list = []
+    for t in tasks:
+        try:
+            stats_list.append(await t)
+        except Exception as e:
+            stats_list.append(e)
     valid_stats, players_detail = [], []
     for p, stats in zip(team, stats_list):
         if isinstance(stats, Exception) or stats is None:
