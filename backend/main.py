@@ -30,7 +30,7 @@ from routers import auth, players, bets, coins, profile, upload, admin, games, f
 from routers import esports
 from routers import admin_jobs
 from routers.settings import router as settings_router
-
+from routers import odds_debug
 # Services
 from services.esports_sync import sync_all_teams
 from services.champion_winrate_collector import refresh_champion_winrates
@@ -148,6 +148,7 @@ app.add_middleware(
 )
 
 app.include_router(settings_router)
+app.include_router(odds_debug.router)
 app.include_router(auth.router)
 app.include_router(players.router)
 app.include_router(bets.router)
