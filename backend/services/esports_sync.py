@@ -692,7 +692,7 @@ async def sync_one_team_leaguepedia(et: "EsportsTeam", db: Session) -> dict:
                 ep.is_starter = False
             summary["players_deactivated"].append(ep.summoner_name or "?")
 
-        # ── 2bis. Désactivation cascade vers ProPlayer ────────────
+    # ── 2bis. Désactivation cascade vers ProPlayer ────────────
     # Si un pro_player de cette team n'apparaît plus dans le roster Leaguepedia
     # on le désactive (is_active=false), sans supprimer.
     pro_in_team = db.query(ProPlayer).filter(ProPlayer.team == et.code).all()

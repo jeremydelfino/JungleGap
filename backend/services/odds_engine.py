@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # --- PARAMÈTRES DE POLARISATION ---
 MARGIN = 0.92          # Marge bookmaker
 EXPONENT = 4         # ÉNORME IMPACT : Transforme un petit avantage en gouffre
-MIN_ODDS = 1.01        # Autorise les côtes de ultra-favori (ex: T1 vs BRO)
+MIN_ODDS = 1.10        # Autorise les côtes de ultra-favori (ex: T1 vs BRO)
 MAX_ODDS = 25.0        # Autorise les côtes de méga-outsider
 # ----------------------------------
 
@@ -30,7 +30,7 @@ PRIOR_WINRATES = {
 
 INTL_BONUS = {
     "T1":   0.90, "GEN":  0.85, "BLG":  0.80, "JDG":  0.75,
-    "G2":   0.90, "KC":   0.55, "MKOI": 0.55, "TL":   0.52,
+    "G2":   0.90, "KC":   0.55, "MKOI": 0.35, "TL":   0.52,
 }
 INTL_DEFAULT = 0.30
 
