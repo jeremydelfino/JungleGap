@@ -670,10 +670,34 @@ async def get_match_detail(
 
     # 6. Roster (depuis EsportsPlayer + EsportsTeam)
     def _team_roster(code: str) -> list:
+        code_up = code.upper()
         players = db.query(EsportsPlayer).filter(
-            EsportsPlayer.team_code == code.upper(),
+            EsportsPlayer.team_code == code_up,
             EsportsPlayer.is_active == True,
         ).order_by(EsportsPlayer.is_starter.desc()).all()
+
+        # Fallback ProPlayer si rien dans esports_players
+        if not players:
+            from models.pro_player import ProPlayer
+            et = db.query(EsportsTeam).filter(EsportsTeam.code == code_up).first()
+            candidates = {code, code_up}
+            if et and et.name:
+                candidates.add(et.name)
+            pros = db.query(ProPlayer).filter(
+                ProPlayer.team.in_(candidates),
+                ProPlayer.is_active == True,
+            ).all()
+            return [
+                {
+                    "summoner_name": p.name,
+                    "first_name":    None,
+                    "last_name":     None,
+                    "role":          p.role,
+                    "photo_url":     p.photo_url,
+                }
+                for p in pros[:5]
+            ]
+
         return [
             {
                 "summoner_name": p.summoner_name,
@@ -682,7 +706,7 @@ async def get_match_detail(
                 "role":          p.role,
                 "photo_url":     p.photo_url,
             }
-            for p in players[:5]  # 5 starters
+            for p in players[:5]
         ]
 
     # 7. Cotes des nouveaux types
@@ -1270,7 +1294,47 @@ def get_esports_team(
         EsportsPlayer.is_active == True,
     ).order_by(EsportsPlayer.is_starter.desc()).all()
 
-    # Stats via EsportsTeamStats
+    # Fallback ProPlayer
+# Fallback ProPlayer
+    if not players:
+        from models.pro_player import ProPlayer
+        candidates = {team_code, team_code.upper()}
+        if team and team.name:
+            candidates.add(team.name)
+        pros = db.query(ProPlayer).filter(
+            ProPlayer.team.in_(candidates),
+            ProPlayer.is_active == True,
+        ).all()
+        roster = [
+            {
+                "id":           p.id,
+                "api_id":       None,
+                "summoner_name": p.name,
+                "first_name":   None,
+                "last_name":    None,
+                "role":         p.role,
+                "photo_url":    p.photo_url,
+                "is_starter":   True,
+                "riot_puuid":   p.riot_puuid,
+            }
+            for p in pros
+        ]
+    else:
+        roster = [
+            {
+                "id":           p.id,
+                "api_id":       p.api_id,
+                "summoner_name": p.summoner_name,
+                "first_name":   p.first_name,
+                "last_name":    p.last_name,
+                "role":         p.role,
+                "photo_url":    p.photo_url,
+                "is_starter":   p.is_starter,
+                "riot_puuid":   p.riot_puuid,
+            }
+            for p in players
+        ]
+
     stats = db.query(EsportsTeamStats).filter(
         EsportsTeamStats.team_code == team_code.upper()
     ).order_by(EsportsTeamStats.updated_at.desc()).first()
@@ -1288,20 +1352,7 @@ def get_esports_team(
             "losses":  stats.losses  if stats else 0,
             "winrate": round(stats.winrate * 100) if stats else 50,
         } if stats else None,
-        "roster": [
-            {
-                "id":           p.id,
-                "api_id":       p.api_id,
-                "summoner_name": p.summoner_name,
-                "first_name":   p.first_name,
-                "last_name":    p.last_name,
-                "role":         p.role,
-                "photo_url":    p.photo_url,
-                "is_starter":   p.is_starter,
-                "riot_puuid":   p.riot_puuid,
-            }
-            for p in players
-        ],
+        "roster": roster,
     }
 
 
