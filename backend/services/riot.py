@@ -223,9 +223,28 @@ async def get_match_result(puuid: str, riot_game_id: str, region: str) -> dict |
 
             if res.status_code == 429:
                 retry_after = int(res.headers.get("Retry-After", 10))
-                logger.warning(f"get_match_result 429 — attente {retry_after}s")
+                logger.warning(f"get_match_result 429 — attente {retry_after}s (ne consomme pas de retry)")
                 await asyncio.sleep(retry_after)
-                continue
+                # Refaire l'appel SANS consommer un retry — boucle while interne
+                for retry_429 in range(3):
+                    async with httpx.AsyncClient(timeout=15) as client:
+                        res = await client.get(url, headers=get_headers())
+                    if res.status_code != 429:
+                        break
+                    ra = int(res.headers.get("Retry-After", 10))
+                    logger.warning(f"get_match_result encore 429 ({retry_429+1}/3) — attente {ra}s")
+                    await asyncio.sleep(ra)
+                if res.status_code == 200:
+                    raw = res.json()
+                    break
+                if res.status_code == 404:
+                    # Continue la logique normale 404
+                    if attempt < MAX_RETRIES - 1:
+                        await asyncio.sleep(RETRY_DELAYS[attempt])
+                        continue
+                    return None
+                if res.status_code != 200:
+                    return None
 
             if res.status_code in (500, 502, 503, 504):
                 delay = RETRY_DELAYS[attempt]
