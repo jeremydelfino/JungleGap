@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAuthStore from '../../store/auth'
 import api from '../../api/client'
+import MatchModal from './MatchModal'
 
 const LEAGUE_META = {
   lec:    { label: 'LEC',    color: '#00b4d8' },
@@ -51,253 +52,6 @@ function getLeaguePriority(leagueName) {
   if (name.includes('msi')) return 5
   if (name.includes('worlds') || name.includes('world championship')) return 6
   return 7
-}
-
-// ─── Modal redesignée ────────────────────────────────────────
-function BetModal({ match, onClose, onBetPlaced }) {
-  const { user } = useAuthStore()
-  const [betType,  setBetType]  = useState('match_winner')
-  const [betTeam,  setBetTeam]  = useState(null)
-  const [betScore, setBetScore] = useState(null)
-  const [amount,   setAmount]   = useState(100)
-  const [loading,  setLoading]  = useState(false)
-  const [error,    setError]    = useState('')
-  const [success,  setSuccess]  = useState(false)
-
-  const t1 = match.teams[0]
-  const t2 = match.teams[1]
-  const bo = match.bo
-  const scoreOpts = SCORE_OPTS[bo] || SCORE_OPTS[3]
-  const leagueMeta = LEAGUE_META[match.league?.slug?.toLowerCase()] || {}
-  const lc = leagueMeta.color || '#65BD62'
-
-  const getOdds = () => {
-    if (!betTeam) return null
-    if (betType === 'match_winner') return betTeam === 'team1' ? t1.odds : t2.odds
-    if (betType === 'exact_score' && betScore) {
-      const base = betTeam === 'team1' ? t1.odds : t2.odds
-      const mult = match.score_multipliers?.[betScore] || 1.5
-      return Math.min(8.0, parseFloat((base * mult).toFixed(2)))
-    }
-    return null
-  }
-
-  const odds         = getOdds()
-  const potentialWin = odds ? Math.floor(amount * odds) : null
-  const selectedTeam = betTeam === 'team1' ? t1 : betTeam === 'team2' ? t2 : null
-
-  const buildBetValue = () => {
-    if (betType === 'match_winner') return betTeam
-    if (betType === 'exact_score')  return `${betTeam}_${betScore}`
-    return null
-  }
-
-  const handleSubmit = async () => {
-    if (!betTeam) return setError('Sélectionne une équipe')
-    if (betType === 'exact_score' && !betScore) return setError('Sélectionne un score')
-    if (amount < 10) return setError('Mise minimum 10 coins')
-    if (amount > (user?.coins || 0)) return setError('Coins insuffisants')
-    setError(''); setLoading(true)
-    try {
-      await api.post('/esports/bets/place', {
-        match_id: match.match_id, bet_type: betType,
-        bet_value: buildBetValue(), amount,
-      })
-      setSuccess(true)
-      setTimeout(() => { onBetPlaced(); onClose() }, 1400)
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Erreur lors du pari')
-    } finally { setLoading(false) }
-  }
-
-  return (
-    <div className="bop-modal-overlay" onClick={onClose}>
-      <div className="bop-modal" onClick={e => e.stopPropagation()}>
-
-        {/* ── BAND HAUT colorée ── */}
-        <div className="bop-modal-band" style={{ background: `linear-gradient(90deg, ${lc}30, transparent)` }}>
-          <div className="bop-modal-band-league" style={{ color: lc }}>
-            <span className="bop-modal-band-dot" style={{ background: lc }} />
-            {match.league?.name}
-            <span className="bop-modal-band-bo">· BO{bo}</span>
-          </div>
-          <button className="bop-modal-close" onClick={onClose}>✕</button>
-        </div>
-
-        {/* ── MATCHUP HERO — grands logos ── */}
-        <div className="bop-modal-matchup">
-          {/* Team 1 */}
-          <div
-            className={`bop-modal-team-hero ${betTeam === 'team1' ? 'selected' : ''}`}
-            onClick={() => setBetTeam('team1')}
-            style={{ '--tc': lc }}
-          >
-            <div className="bop-modal-team-logo-big">
-              <img src={t1.image} alt={t1.code} referrerPolicy="no-referrer" onError={e => { e.target.style.display = 'none' }} />
-            </div>
-            <div className="bop-modal-team-code">{t1.code}</div>
-            <div className="bop-modal-team-record">{t1.record?.wins ?? 0}W · {t1.record?.losses ?? 0}L</div>
-            <div className="bop-modal-team-odds-pill" style={{
-              background: betTeam === 'team1' ? lc + '20' : '#ffffff08',
-              borderColor: betTeam === 'team1' ? lc + '50' : '#ffffff10',
-              color: betTeam === 'team1' ? lc : '#e2b147',
-            }}>×{t1.odds}</div>
-            {betTeam === 'team1' && <div className="bop-modal-team-check" style={{ background: lc }}>✓</div>}
-          </div>
-
-          {/* Centre */}
-          <div className="bop-modal-vs-block">
-            <div className="bop-modal-vs-text">VS</div>
-            <div className="bop-modal-vs-date">{formatDate(match.start_time)}</div>
-          </div>
-
-          {/* Team 2 */}
-          <div
-            className={`bop-modal-team-hero ${betTeam === 'team2' ? 'selected' : ''}`}
-            onClick={() => setBetTeam('team2')}
-            style={{ '--tc': lc }}
-          >
-            <div className="bop-modal-team-logo-big">
-              <img src={t2.image} alt={t2.code} referrerPolicy="no-referrer" onError={e => { e.target.style.display = 'none' }} />
-            </div>
-            <div className="bop-modal-team-code">{t2.code}</div>
-            <div className="bop-modal-team-record">{t2.record?.wins ?? 0}W · {t2.record?.losses ?? 0}L</div>
-            <div className="bop-modal-team-odds-pill" style={{
-              background: betTeam === 'team2' ? lc + '20' : '#ffffff08',
-              borderColor: betTeam === 'team2' ? lc + '50' : '#ffffff10',
-              color: betTeam === 'team2' ? lc : '#e2b147',
-            }}>×{t2.odds}</div>
-            {betTeam === 'team2' && <div className="bop-modal-team-check" style={{ background: lc }}>✓</div>}
-          </div>
-        </div>
-
-        <div className="bop-modal-body">
-
-          {/* ── TYPE PARI ── */}
-          <div className="bop-modal-tabs">
-            {[
-              { key: 'match_winner', label: 'Vainqueur',   icon: '🏆' },
-              { key: 'exact_score',  label: 'Score exact', icon: '📊' },
-            ].map(bt => (
-              <button key={bt.key}
-                className={`bop-modal-tab ${betType === bt.key ? 'active' : ''}`}
-                style={{ '--tc': lc }}
-                onClick={() => { setBetType(bt.key); setBetScore(null) }}>
-                <span>{bt.icon}</span> {bt.label}
-              </button>
-            ))}
-          </div>
-
-          {/* ── SCORE EXACT ── */}
-          {betType === 'exact_score' && (
-            <div className="bop-modal-scores-wrap">
-              {betTeam ? (
-                <div className="bop-modal-scores">
-                  {scoreOpts.map(s => {
-                    const [a, b]  = s.split('-')
-                    const display = betTeam === 'team1' ? `${a} — ${b}` : `${b} — ${a}`
-                    const mult    = match.score_multipliers?.[s] || 1.5
-                    const active  = betScore === s
-                    return (
-                      <button key={s}
-                        className={`bop-modal-score-opt ${active ? 'active' : ''}`}
-                        style={{ '--tc': lc }}
-                        onClick={() => setBetScore(s)}>
-                        <span className="bop-score-display">{display}</span>
-                        <span className="bop-score-mult" style={{ color: active ? lc : '#e2b147' }}>×{(t1.odds * mult).toFixed(2)}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="bop-modal-hint">← Sélectionne d'abord une équipe</div>
-              )}
-            </div>
-          )}
-
-          {/* ── MISE ── */}
-          <div className="bop-modal-stake-section">
-            <div className="bop-modal-section-label">Mise</div>
-            <div className="bop-modal-presets">
-              {[50, 100, 250, 500, 1000].map(v => (
-                <button key={v}
-                  className={`bop-modal-preset-btn ${amount === v ? 'active' : ''}`}
-                  style={{ '--tc': lc }}
-                  onClick={() => setAmount(v)}>
-                  {v}
-                </button>
-              ))}
-            </div>
-            <div className="bop-modal-input-row">
-              <input
-                className="bop-modal-input"
-                type="number" min={10} max={user?.coins || 0}
-                value={amount}
-                onChange={e => setAmount(Math.max(10, parseInt(e.target.value) || 10))}
-                style={{ '--tc': lc }}
-              />
-              <span className="bop-modal-input-label">coins</span>
-              <span className="bop-modal-balance">/ {user?.coins?.toLocaleString()}</span>
-            </div>
-          </div>
-
-          {/* ── RÉCAP GAIN ── */}
-          {odds && selectedTeam ? (
-            <div className="bop-modal-gain-recap" style={{ borderColor: lc + '25', background: lc + '08' }}>
-              <div className="bop-modal-gain-left">
-                <img src={selectedTeam.image} alt={selectedTeam.code} referrerPolicy="no-referrer" onError={e => { e.target.style.display = 'none' }} />
-                <div>
-                  <div className="bop-modal-gain-team">{selectedTeam.code}</div>
-                  {betScore && (
-                    <div className="bop-modal-gain-score" style={{ color: lc }}>
-                      {betTeam === 'team1' ? betScore : betScore.split('-').reverse().join('-')}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="bop-modal-gain-right">
-                <div className="bop-modal-gain-label">Gain potentiel</div>
-                <div className="bop-modal-gain-amount" style={{ color: lc }}>
-                  +{potentialWin?.toLocaleString()}
-                  <span className="bop-modal-gain-coins">coins</span>
-                </div>
-                <div className="bop-modal-gain-odds">cote ×{odds}</div>
-              </div>
-            </div>
-          ) : (
-            <div className="bop-modal-gain-empty">
-              Sélectionne une équipe pour voir le gain potentiel
-            </div>
-          )}
-
-          {error && <div className="bop-modal-error">{error}</div>}
-
-          {success ? (
-            <div className="bop-modal-success">
-              <span>✓</span> Pari enregistré !
-            </div>
-          ) : (
-            <button
-              className="bop-modal-confirm"
-              onClick={handleSubmit}
-              disabled={loading || !betTeam || (betType === 'exact_score' && !betScore)}
-              style={{ '--tc': lc }}
-            >
-              {loading ? (
-                <span className="bop-modal-spinner" />
-              ) : (
-                <>
-                  <span>Confirmer le pari</span>
-                  <span className="bop-modal-confirm-amount">{amount.toLocaleString()} coins</span>
-                </>
-              )}
-              <span className="bop-modal-confirm-shimmer" />
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  )
 }
 
 // ─── Match Card ───────────────────────────────────────────────
@@ -461,7 +215,6 @@ export default function BetOnPros() {
     grouped[key].push(m)
   }
 
-  // Trier les ligues : LEC et LCK en premier
   const sortedLeagues = Object.entries(grouped).sort(([nameA], [nameB]) => {
     return getLeaguePriority(nameA) - getLeaguePriority(nameB)
   })
@@ -557,9 +310,12 @@ export default function BetOnPros() {
           ))
         )}
       </div>
-
       {betModal && (
-        <BetModal match={betModal} onClose={() => setBetModal(null)} onBetPlaced={handleBetPlaced} />
+        <MatchModal
+          matchId={betModal.match_id}
+          onClose={() => setBetModal(null)}
+          onBetPlaced={handleBetPlaced}
+        />
       )}
     </div>
   )

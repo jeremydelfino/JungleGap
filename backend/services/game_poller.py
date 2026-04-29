@@ -47,6 +47,16 @@ CHAMP_VERSION = "14.24.1"
 _champ_id_to_name:   dict[int, str]       = {}
 _champ_name_to_tags: dict[str, list[str]] = {}
 
+async def _retry_resolve_after_delay(game_id: int, riot_game_id: str, region: str, delay_seconds: int):
+    """
+    Réessaye la résolution d'une game après un délai (typiquement 1h).
+    Permet de récupérer les games indexées tardivement par Riot.
+    """
+    logger.info(f"   ⏰ Retry programmé pour game {game_id} dans {delay_seconds}s")
+    await asyncio.sleep(delay_seconds)
+    logger.info(f"   🔄 Retry résolution game {game_id}")
+    await resolve_bets_for_game(game_id, riot_game_id, region)
+
 async def load_champion_mapping():
     global _champ_id_to_name, _champ_name_to_tags
     try:
@@ -440,25 +450,16 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
             logger.info(f"   ℹ️  Aucun pari pending pour game {game_id}")
             return
 
-        # ── Si pas de résultat → on rembourse, mais on log MASSIVEMENT ─
+# ── Si pas de résultat après 17min → on laisse en pending pour résolution manuelle ─
         if not result:
             logger.error(
                 f"   ❌ MATCH-V5 indisponible après {len(RETRY_DELAYS)} tentatives — "
-                f"game {game_id} riot_id={riot_game_id} region={region} → REMBOURSEMENT"
+                f"game {game_id} riot_id={riot_game_id} region={region} — "
+                f"paris laissés en PENDING pour résolution manuelle"
             )
-            for bet in pending_bets:
-                bet.status = "cancelled"
-                user = db.query(User).filter(User.id == bet.user_id).with_for_update().first()
-                if user:
-                    user.coins += bet.amount
-                    db.add(Transaction(
-                        user_id=user.id, type="bet_refunded", amount=bet.amount,
-                        description=f"Pari annulé (MATCH-V5 timeout après 17min) — remboursement de {bet.amount}",
-                    ))
-                logger.info(f"   ↩️  Bet {bet.id} remboursé ({bet.amount} coins)")
-            db.commit()
+            # On planifie une nouvelle tentative dans 1 heure
+            asyncio.create_task(_retry_resolve_after_delay(game_id, riot_game_id, region, delay_seconds=3600))
             return
-
         # ── Résultat disponible ──────────────────────────────────
         winner_team       = (result.get("winner_team")       or "").lower()
         first_blood       = (result.get("first_blood")       or "").lower() if result.get("first_blood") else None
@@ -589,7 +590,7 @@ async def resolve_bets_for_game(game_id: int, riot_game_id: str, region: str):
                     user.coins += bet.amount
                     db.add(Transaction(
                         user_id=user.id, type="bet_refunded", amount=bet.amount,
-                        description=f"Pari annulé — {refund_reason}",
+                        description=f"Pari annulé — game {riot_game_id} (région {region}) introuvable dans MATCH-V5 après 17min",
                     ))
                 logger.info(f"   ↩️  Bet {bet.id} remboursé — {refund_reason}")
                 continue

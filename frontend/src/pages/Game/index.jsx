@@ -54,8 +54,14 @@ const fmtO  = v => v ? `×${Number(v).toFixed(2)}` : null
 
 function getOdds(od, slug, value) {
   if (!od) return null
-  if (SIDE_BET_TYPES.has(slug)) return od[slug]?.[value] ?? null
-  return od[slug] ?? null
+  if (SIDE_BET_TYPES.has(slug)) {
+    const v = od[slug]?.[value]
+    return typeof v === 'number' ? v : null
+  }
+  const v = od[slug]
+  if (typeof v === 'number') return v
+  if (v && typeof v === 'object' && typeof v.odds === 'number') return v.odds  // legacy
+  return null
 }
 
 // ─── Draft composants ─────────────────────────────────────────
@@ -309,7 +315,7 @@ export default function Game() {
           <button key={slug} className={`gp-dur-card${durSel === slug ? ' sel' : ''}`} onClick={() => setDur(slug)} disabled={!betsOpen}>
             <span className="gp-dur-icon">{icon}</span>
             <div className="gp-dur-info"><div className="gp-dur-label">{label}</div><div className="gp-dur-sub">{sub}</div></div>
-            {od?.[slug] && <span className="gp-chip">{fmtO(od[slug])}</span>}
+            {getOdds(od, slug) && <span className="gp-chip">{fmtO(getOdds(od, slug))}</span>} 
             {durSel === slug && <span className="gp-check">✓</span>}
           </button>
         ))}
@@ -329,7 +335,7 @@ export default function Game() {
             <div className="gp-perf-left">
               <span className="gp-perf-icon">{icon}</span>
               <div><div className="gp-perf-name">{label}</div><div className="gp-perf-sub">{sub}</div></div>
-              {od?.[slug] && <span className="gp-chip">{fmtO(od[slug])}</span>}
+              {getOdds(od, slug) && <span className="gp-chip">{fmtO(getOdds(od, slug))}</span>}
             </div>
             <PickBtn slug={slug} title={`${icon} ${label} — Choisir`} />
           </div>

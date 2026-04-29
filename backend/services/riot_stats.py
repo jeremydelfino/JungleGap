@@ -57,10 +57,11 @@ async def _fetch_match(match_id: str, routing: str) -> dict | None:
     url = f"https://{routing}.api.riotgames.com/lol/match/v5/matches/{match_id}"
     try:
         async with httpx.AsyncClient(timeout=10) as c:
-            r = await c.get(url, headers=get_headers())
-            if r.status_code == 200:
-                return r.json()
-            return None
+            async with riot_limiter:
+                r = await c.get(url, headers=get_headers())
+                if r.status_code == 200:
+                    return r.json()
+                return None
     except Exception as e:
         logger.error(f"_fetch_match error {match_id}: {e}")
         return None

@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 import asyncio
 import logging
+from services.riot_limiter import riot_limiter
 logger = logging.getLogger(__name__)
 
 load_dotenv()
@@ -95,7 +96,8 @@ async def get_live_game_by_puuid(puuid: str, region: str) -> dict | None:
     for attempt in range(MAX_RETRIES):
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                res = await client.get(url, headers=get_headers())
+                async with riot_limiter:
+                    res = await client.get(url, headers=get_headers())
 
             # Pas en jeu
             if res.status_code == 404:
@@ -201,7 +203,8 @@ async def get_match_result(puuid: str, riot_game_id: str, region: str) -> dict |
     for attempt in range(MAX_RETRIES):
         try:
             async with httpx.AsyncClient(timeout=15) as client:
-                res = await client.get(url, headers=get_headers())
+                async with riot_limiter:
+                    res = await client.get(url, headers=get_headers())
 
             if res.status_code == 200:
                 raw = res.json()

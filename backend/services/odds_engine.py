@@ -199,6 +199,159 @@ def compute_team_score(team_code: str, league_slug: str, opp_code: str, events: 
         },
     }
 
+# ──────────────────────────────────────────────────────────────
+# H2H DÉTAILLÉ (pour la fiche match)
+# ──────────────────────────────────────────────────────────────
+
+def compute_h2h_detail(t1_code: str, t2_code: str, events: list, max_history: int = 5) -> dict:
+    """
+    Renvoie l'historique détaillé des confrontations directes entre t1 et t2.
+    Retourne total_matches, t1_wins, t2_wins, last_match (date/winner/score) et history.
+    """
+    h2h_matches = []
+    for ev in events:
+        if ev.get("type") != "match":
+            continue
+        match = ev.get("match", {})
+        teams = match.get("teams", [])
+        if len(teams) < 2:
+            continue
+
+        a, b = teams[0], teams[1]
+        ca, cb = a.get("code", ""), b.get("code", "")
+        # Vérifie qu'on a bien les deux équipes (dans n'importe quel ordre)
+        if {ca, cb} != {t1_code, t2_code}:
+            continue
+
+        wa = (a.get("result") or {}).get("gameWins", 0)
+        wb = (b.get("result") or {}).get("gameWins", 0)
+        if wa == 0 and wb == 0:
+            continue  # match non joué ou annulé
+
+        # Normalise pour que t1 soit toujours référent
+        is_t1_first = (ca == t1_code)
+        t1_wins = wa if is_t1_first else wb
+        t2_wins = wb if is_t1_first else wa
+        winner = "team1" if t1_wins > t2_wins else "team2"
+
+        start_str = ev.get("startTime", "")
+        match_dt = None
+        if start_str:
+            try:
+                match_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+            except Exception:
+                pass
+
+        h2h_matches.append({
+            "date":       start_str,
+            "date_obj":   match_dt,
+            "winner":     winner,
+            "score":      f"{t1_wins}-{t2_wins}",
+            "t1_wins":    t1_wins,
+            "t2_wins":    t2_wins,
+        })
+
+    h2h_matches.sort(
+        key=lambda m: m["date_obj"] or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+
+    t1_total_wins = sum(1 for m in h2h_matches if m["winner"] == "team1")
+    t2_total_wins = sum(1 for m in h2h_matches if m["winner"] == "team2")
+
+    # Nettoie le date_obj (non sérialisable JSON)
+    history = []
+    for m in h2h_matches[:max_history]:
+        history.append({
+            "date":   m["date"],
+            "winner": m["winner"],
+            "score":  m["score"],
+        })
+
+    return {
+        "total_matches": len(h2h_matches),
+        "team1_wins":    t1_total_wins,
+        "team2_wins":    t2_total_wins,
+        "last_match":    history[0] if history else None,
+        "history":       history,
+    }
+
+
+# ──────────────────────────────────────────────────────────────
+# CÔTES DES NOUVEAUX TYPES DE PARIS
+# ──────────────────────────────────────────────────────────────
+
+MARGIN_SIDE = 0.92  # marge bookmaker pour les paris side
+
+
+def compute_total_maps_odds(odds_t1: float, odds_t2: float, bo: int) -> dict:
+    """
+    "Total de maps over/under". Estime la prob qu'on aille au-delà du seuil
+    en fonction de la dominance du favori (cotes).
+    
+    BO3 : seuil = 2.5 (over = match va au game 3 = 2-1 ou 1-2)
+    BO5 : seuils = 3.5 et 4.5
+    """
+    if bo == 1:
+        return {}  # pas de "total maps" en BO1
+
+    # Probabilité implicite que le favori gagne (sans la marge)
+    prob_t1 = 1.0 / odds_t1 if odds_t1 > 0 else 0.5
+    prob_t2 = 1.0 / odds_t2 if odds_t2 > 0 else 0.5
+    total_p = prob_t1 + prob_t2
+    prob_t1_norm = prob_t1 / total_p if total_p > 0 else 0.5
+
+    # Plus le match est équilibré (prob ≈ 0.5), plus on a de chances d'aller loin
+    balance = 1.0 - 2.0 * abs(prob_t1_norm - 0.5)  # 1 si 50/50, 0 si stomp total
+
+    if bo == 3:
+        # Prob d'aller au game 3 = corrélée à l'équilibre
+        # Match équilibré → ~70% d'aller au 3e game ; stomp → ~25%
+        prob_over_2_5 = 0.25 + 0.45 * balance
+        odds_over     = round(_clamp(MARGIN_SIDE / prob_over_2_5,        1.20, 5.0), 2)
+        odds_under    = round(_clamp(MARGIN_SIDE / (1 - prob_over_2_5),  1.20, 5.0), 2)
+        return {
+            "over_2.5":  odds_over,
+            "under_2.5": odds_under,
+        }
+
+    if bo == 5:
+        # Prob d'aller au game 4
+        prob_over_3_5 = 0.35 + 0.45 * balance
+        # Prob d'aller au game 5 (toujours plus rare que game 4)
+        prob_over_4_5 = 0.15 + 0.30 * balance
+        return {
+            "over_3.5":  round(_clamp(MARGIN_SIDE / prob_over_3_5,       1.20, 5.0), 2),
+            "under_3.5": round(_clamp(MARGIN_SIDE / (1 - prob_over_3_5), 1.20, 5.0), 2),
+            "over_4.5":  round(_clamp(MARGIN_SIDE / prob_over_4_5,       1.20, 6.0), 2),
+            "under_4.5": round(_clamp(MARGIN_SIDE / (1 - prob_over_4_5), 1.20, 5.0), 2),
+        }
+
+    return {}
+
+
+def compute_map_winner_odds(odds_t1: float, odds_t2: float, bo: int) -> list:
+    """
+    Cote pour "qui gagne la map N". La map 1 = même cote que match_winner.
+    Les maps suivantes convergent légèrement vers 2.0 (incertitude croissante,
+    adaptation des équipes au draft adverse).
+    """
+    if bo == 1:
+        return []
+
+    result = []
+    max_maps = bo  # BO3 → 3 maps, BO5 → 5 maps
+    for map_n in range(1, max_maps + 1):
+        convergence = (map_n - 1) * 0.10  # 0% map1, 10% map2, 20% map3...
+        new_t1 = round(_clamp(odds_t1 * (1 - convergence) + 2.0 * convergence, 1.10, 8.0), 2)
+        new_t2 = round(_clamp(odds_t2 * (1 - convergence) + 2.0 * convergence, 1.10, 8.0), 2)
+        result.append({
+            "map":   map_n,
+            "team1": new_t1,
+            "team2": new_t2,
+        })
+    return result
+
 def compute_match_odds(t1_code: str, t2_code: str, league_slug: str, events: list, db: Session, amt_t1: int = 0, amt_t2: int = 0) -> dict:
     r1 = compute_team_score(t1_code, league_slug, t2_code, events, db)
     r2 = compute_team_score(t2_code, league_slug, t1_code, events, db)

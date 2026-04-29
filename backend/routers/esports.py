@@ -236,11 +236,15 @@ def parse_actual_score(t1_wins: int, t2_wins: int) -> tuple[str, str]:
 
 # ─── Résolution des paris ─────────────────────────────────────
 
-def resolve_match(match_id: str, db: Session):
+def resolve_match(match_id: str, db: Session, match_extras: dict | None = None):
     """
-    Résolution effective d'un match esports.
-    Compare bet_value avec actual_winner en NORMALISANT la casse.
+    ...
+    match_extras : dict optionnel avec des infos pour résoudre les paris avancés.
+        - game_winners : ["team1", "team2", "team1"] (gagnants par map)
     """
+    if match_extras is None:
+        match_extras = {}
+
     bets = db.query(EsportsBet).filter(
         EsportsBet.match_id == match_id,
         EsportsBet.status   == "pending",
@@ -267,12 +271,53 @@ def resolve_match(match_id: str, db: Session):
 
         if bet.bet_type == "match_winner":
             won = (bet_value == actual_winner)
-
         elif bet.bet_type == "exact_score":
             parts      = bet_value.split("_", 1)
             bet_winner = parts[0]
             bet_score  = parts[1] if len(parts) > 1 else ""
             won        = (bet_winner == actual_winner and bet_score == actual_score)
+
+        elif bet.bet_type == "total_maps_over":
+            # actual_score = "2-1", "3-0", etc.
+            try:
+                t1w, t2w = [int(x) for x in actual_score.split("-")]
+                threshold = float(bet.bet_value)
+                won = (t1w + t2w) > threshold
+            except (ValueError, AttributeError):
+                logger.warning(f"[resolve_match] bet {bet.id}: actual_score invalide '{actual_score}'")
+                continue
+
+        elif bet.bet_type == "total_maps_under":
+            try:
+                t1w, t2w = [int(x) for x in actual_score.split("-")]
+                threshold = float(bet.bet_value)
+                won = (t1w + t2w) < threshold
+            except (ValueError, AttributeError):
+                logger.warning(f"[resolve_match] bet {bet.id}: actual_score invalide '{actual_score}'")
+                continue
+
+        elif bet.bet_type == "first_map":
+            # Première map = première game qu'on a dans game_winners
+            game_winners = match_extras.get("game_winners", [])
+            if not game_winners:
+                logger.warning(f"[resolve_match] bet {bet.id}: pas de games disponibles, skip")
+                continue
+            won = (bet_value == game_winners[0])
+
+        elif bet.bet_type == "map_winner":
+            game_winners = match_extras.get("game_winners", [])
+            parts = bet_value.split("_")
+            if len(parts) != 2 or not parts[1].startswith("map"):
+                logger.warning(f"[resolve_match] bet {bet.id}: bet_value malformé '{bet_value}'")
+                continue
+            try:
+                map_n = int(parts[1].replace("map", ""))
+            except ValueError:
+                continue
+            if map_n < 1 or map_n > len(game_winners):
+                logger.warning(f"[resolve_match] bet {bet.id}: map {map_n} hors limites")
+                continue
+            won = (parts[0] == game_winners[map_n - 1])
 
         else:
             logger.warning(f"[resolve_match] bet {bet.id}: type inconnu '{bet.bet_type}', skip")
@@ -359,6 +404,35 @@ async def get_esports_schedule(
         bo       = match.get("strategy", {}).get("count", 3)
         league   = ev.get("league", {})
         league_s = normalize_league_slug(league)
+
+        t1_wins    = (t1.get("result") or {}).get("gameWins", 0) or 0
+        t2_wins    = (t2.get("result") or {}).get("gameWins", 0) or 0
+        t1_outcome = (t1.get("result") or {}).get("outcome", None)
+        t2_outcome = (t2.get("result") or {}).get("outcome", None)
+
+        # ── Dérivation robuste de l'état réel ──────────────────────
+        # Riot marque parfois mal `state`. On déduit l'état des données factuelles.
+        derived_state = state
+        has_result    = t1_wins > 0 or t2_wins > 0 or t1_outcome in ("win", "loss") or t2_outcome in ("win", "loss")
+
+        if has_result:
+            # Si on a un résultat, le match est terminé — peu importe ce que dit `state`
+            derived_state = "completed"
+        elif state == "unstarted":
+            # Pas de résultat mais marqué unstarted → vérifie la date
+            raw_start = ev.get("startTime")
+            if raw_start:
+                try:
+                    start_dt = datetime.fromisoformat(raw_start.replace("Z", "+00:00"))
+                    age = datetime.now(timezone.utc) - start_dt
+                    # Plus de 6h dans le passé sans résultat = match annulé / reporté
+                    # → on l'écarte du "à venir" pour ne pas polluer
+                    if age > timedelta(hours=6):
+                        derived_state = "completed"  # alternative : "cancelled" si tu veux distinguer
+                except Exception:
+                    pass
+
+        state = derived_state
 
         t1_wins    = (t1.get("result") or {}).get("gameWins", 0)
         t2_wins    = (t2.get("result") or {}).get("gameWins", 0)
@@ -483,6 +557,198 @@ async def get_esports_live(db: Session = Depends(get_db)):
         })
     return result
 
+@router.get("/match/{match_id}")
+async def get_match_detail(
+    match_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Renvoie le détail enrichi d'un match : forme, h2h, rosters, breakdown odds,
+    cotes pour tous les types de paris disponibles.
+    """
+    from services.odds_engine import (
+        compute_match_odds as _compute_match_odds,
+        compute_h2h_detail,
+        compute_total_maps_odds,
+        compute_map_winner_odds,
+    )
+    from models.team_form import TeamForm
+
+    # 1. Trouver l'event dans schedule + completed
+    try:
+        data = await lolesports.get_schedule(list(COVERED_LEAGUES.values()))
+    except Exception as e:
+        raise HTTPException(502, f"Erreur API : {e}")
+
+    events = data.get("data", {}).get("schedule", {}).get("events", [])
+    all_completed = []
+    for slug, lid in COVERED_LEAGUES.items():
+        try:
+            tid = await lolesports.get_current_tournament_id(lid)
+            if tid:
+                ce = await lolesports.get_completed_events(tid)
+                all_completed.extend(ce.get("data", {}).get("schedule", {}).get("events", []))
+        except Exception:
+            pass
+
+    seen_ids = {ev.get("match", {}).get("id") for ev in events if ev.get("match")}
+    for ev in all_completed:
+        mid = ev.get("match", {}).get("id")
+        if mid and mid not in seen_ids:
+            events.append(ev)
+            seen_ids.add(mid)
+
+    match_event = next(
+        (ev for ev in events if ev.get("match", {}).get("id") == match_id),
+        None,
+    )
+    if not match_event:
+        raise HTTPException(404, "Match introuvable")
+
+    match    = match_event.get("match", {})
+    teams    = match.get("teams", [])
+    if len(teams) < 2:
+        raise HTTPException(400, "Données du match incomplètes")
+
+    t1, t2   = teams[0], teams[1]
+    bo       = match.get("strategy", {}).get("count", 3)
+    state    = match_event.get("state", "unstarted")
+    league   = match_event.get("league", {})
+    league_s = normalize_league_slug(league)
+
+    # 2. Calcul des cotes de base
+    amt_t1, amt_t2 = get_bet_amounts(db, match_id)
+    odds_result = _compute_match_odds(
+        t1_code     = t1.get("code", ""),
+        t2_code     = t2.get("code", ""),
+        league_slug = league_s,
+        events      = all_completed,
+        db          = db,
+        amt_t1      = amt_t1,
+        amt_t2      = amt_t2,
+    )
+    odds_t1 = odds_result["odds_t1"]
+    odds_t2 = odds_result["odds_t2"]
+
+    # 3. Forme depuis TeamForm
+    def _team_form(code: str) -> dict:
+        tf = db.query(TeamForm).filter(TeamForm.team_code == code.upper()).first()
+        if not tf:
+            return {
+                "last_5":          "",
+                "streak":          0,
+                "forme_score":     0.50,
+                "last_match_date": None,
+            }
+        return {
+            "last_5":          tf.last_5_results or "",
+            "streak":          tf.streak,
+            "forme_score":     tf.forme_score,
+            "last_match_date": tf.last_match_date.isoformat() if tf.last_match_date else None,
+        }
+
+    # 4. Saison depuis EsportsTeamStats
+    def _team_season(code: str) -> dict:
+        stats = db.query(EsportsTeamStats).filter(
+            EsportsTeamStats.team_code   == code.upper(),
+            EsportsTeamStats.league_slug == league_s,
+        ).first()
+        if not stats:
+            stats = db.query(EsportsTeamStats).filter(
+                EsportsTeamStats.team_code == code.upper()
+            ).order_by(EsportsTeamStats.updated_at.desc()).first()
+        if not stats:
+            return {"wins": 0, "losses": 0, "winrate": 50}
+        return {
+            "wins":    stats.wins,
+            "losses":  stats.losses,
+            "winrate": round(stats.winrate * 100),
+        }
+
+    # 5. H2H
+    h2h = compute_h2h_detail(t1.get("code", ""), t2.get("code", ""), all_completed, max_history=5)
+
+    # 6. Roster (depuis EsportsPlayer + EsportsTeam)
+    def _team_roster(code: str) -> list:
+        players = db.query(EsportsPlayer).filter(
+            EsportsPlayer.team_code == code.upper(),
+            EsportsPlayer.is_active == True,
+        ).order_by(EsportsPlayer.is_starter.desc()).all()
+        return [
+            {
+                "summoner_name": p.summoner_name,
+                "first_name":    p.first_name,
+                "last_name":     p.last_name,
+                "role":          p.role,
+                "photo_url":     p.photo_url,
+            }
+            for p in players[:5]  # 5 starters
+        ]
+
+    # 7. Cotes des nouveaux types
+    side_odds = {
+        "first_map": {"team1": odds_t1, "team2": odds_t2},
+        "total_maps": compute_total_maps_odds(odds_t1, odds_t2, bo),
+        "map_winners": compute_map_winner_odds(odds_t1, odds_t2, bo),
+    }
+
+    # 8. Total bets sur ce match
+    total_bets = db.query(func.count(EsportsBet.id)).filter(
+        EsportsBet.match_id == match_id,
+        EsportsBet.status.in_(["pending", "won", "lost"]),
+    ).scalar() or 0
+
+    return {
+        "match_id":   match_id,
+        "state":      state,
+        "start_time": match_event.get("startTime"),
+        "block_name": match_event.get("blockName", ""),
+        "league":     {
+            "slug":  league_s,
+            "name":  league.get("name", ""),
+            "image": league.get("image", ""),
+        },
+        "bo": bo,
+
+        "teams": [
+            {
+                "slot":    "team1",
+                "code":    t1.get("code", ""),
+                "name":    t1.get("name", ""),
+                "image":   t1.get("image", ""),
+                "record":  t1.get("record", {}),
+                "outcome": (t1.get("result") or {}).get("outcome"),
+                "wins":    (t1.get("result") or {}).get("gameWins", 0),
+                "form":    _team_form(t1.get("code", "")),
+                "season":  _team_season(t1.get("code", "")),
+                "roster":  _team_roster(t1.get("code", "")),
+            },
+            {
+                "slot":    "team2",
+                "code":    t2.get("code", ""),
+                "name":    t2.get("name", ""),
+                "image":   t2.get("image", ""),
+                "record":  t2.get("record", {}),
+                "outcome": (t2.get("result") or {}).get("outcome"),
+                "wins":    (t2.get("result") or {}).get("gameWins", 0),
+                "form":    _team_form(t2.get("code", "")),
+                "season":  _team_season(t2.get("code", "")),
+                "roster":  _team_roster(t2.get("code", "")),
+            },
+        ],
+
+        "odds": {
+            "team1":      odds_t1,
+            "team2":      odds_t2,
+            "prob_team1": odds_result["prob_t1"],
+            "prob_team2": odds_result["prob_t2"],
+        },
+
+        "score_multipliers": SCORE_MULTIPLIERS.get(bo, SCORE_MULTIPLIERS[3]),
+        "side_odds":         side_odds,
+        "head_to_head":      h2h,
+        "total_bets":        total_bets,
+    }
 
 @router.get("/standings")
 async def get_standings_cached(
@@ -514,6 +780,11 @@ async def trigger_refresh_standings(db: Session = Depends(get_db)):
     await refresh_all_standings(db)
     return {"success": True}
 
+VALID_ESPORTS_BET_TYPES = {
+    "match_winner", "exact_score",
+    "total_maps_over", "total_maps_under",
+    "map_winner", "first_map",
+}
 
 class PlaceEsportsBetSchema(BaseModel):
     match_id:  str
@@ -531,11 +802,10 @@ class PlaceEsportsBetSchema(BaseModel):
 
     @validator("bet_type")
     def bet_type_valid(cls, v):
-        if v not in ("match_winner", "exact_score"):
-            raise ValueError("bet_type invalide")
+        if v not in VALID_ESPORTS_BET_TYPES:
+            raise ValueError(f"bet_type invalide : {v}")
         return v
 
-# TA FONCTION @router.post("/bets/place") VIENT ENSUITE ICI
 @router.post("/bets/place")
 async def place_esports_bet(
     body: PlaceEsportsBetSchema,
@@ -586,8 +856,29 @@ async def place_esports_bet(
 
     if not match_event:
         raise HTTPException(404, "Match introuvable ou déjà terminé")
-    if match_event.get("state") == "completed":
+    raw_state = match_event.get("state", "")
+    teams_check = match_event.get("match", {}).get("teams", [])
+    has_result = False
+    if len(teams_check) >= 2:
+        for t in teams_check[:2]:
+            r = t.get("result") or {}
+            if (r.get("gameWins") or 0) > 0 or r.get("outcome") in ("win", "loss"):
+                has_result = True
+                break
+
+    if raw_state == "completed" or has_result:
         raise HTTPException(400, "Ce match est déjà terminé")
+
+    raw_start = match_event.get("startTime")
+    if raw_start:
+        try:
+            start_dt = datetime.fromisoformat(raw_start.replace("Z", "+00:00"))
+            if start_dt < datetime.now(timezone.utc) - timedelta(hours=6):
+                raise HTTPException(400, "Ce match a démarré il y a trop longtemps — il est probablement terminé")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
 
     # 3. Extraction des données et FIX du start_time
     match_data = match_event.get("match", {})
@@ -668,6 +959,43 @@ async def place_esports_bet(
         base_odds = odds_result["odds_t1"] if bet_winner == "team1" else odds_result["odds_t2"]
         score_mult = SCORE_MULTIPLIERS.get(bo, SCORE_MULTIPLIERS[3]).get(score_key, 1.5)
         odds = round(min(15.0, base_odds * score_mult), 2)
+    elif body.bet_type == "first_map":
+        # Même cote que match_winner pour la map 1
+        if body.bet_value not in ("team1", "team2"):
+            raise HTTPException(400, "bet_value invalide pour first_map (team1/team2)")
+        odds = odds_result["odds_t1"] if body.bet_value == "team1" else odds_result["odds_t2"]
+
+    elif body.bet_type == "map_winner":
+        # bet_value : "team1_map1", "team2_map3", etc.
+        from services.odds_engine import compute_map_winner_odds
+        parts = body.bet_value.split("_")
+        if len(parts) != 2 or parts[0] not in ("team1", "team2") or not parts[1].startswith("map"):
+            raise HTTPException(400, "bet_value invalide pour map_winner (ex: team1_map2)")
+        try:
+            map_n = int(parts[1].replace("map", ""))
+        except ValueError:
+            raise HTTPException(400, "Numéro de map invalide")
+        if map_n < 1 or map_n > bo:
+            raise HTTPException(400, f"Map {map_n} hors limites pour ce BO{bo}")
+
+        map_odds_list = compute_map_winner_odds(odds_result["odds_t1"], odds_result["odds_t2"], bo)
+        target_map = next((m for m in map_odds_list if m["map"] == map_n), None)
+        if not target_map:
+            raise HTTPException(400, "Map introuvable")
+        odds = target_map["team1"] if parts[0] == "team1" else target_map["team2"]
+
+    elif body.bet_type in ("total_maps_over", "total_maps_under"):
+        # bet_value : "2.5", "3.5", "4.5"
+        from services.odds_engine import compute_total_maps_odds
+        try:
+            threshold = float(body.bet_value)
+        except ValueError:
+            raise HTTPException(400, "Seuil invalide (ex: 2.5)")
+        total_odds = compute_total_maps_odds(odds_result["odds_t1"], odds_result["odds_t2"], bo)
+        key = f"over_{body.bet_value}" if body.bet_type == "total_maps_over" else f"under_{body.bet_value}"
+        if key not in total_odds:
+            raise HTTPException(400, f"Seuil {threshold} non disponible pour BO{bo}")
+        odds = total_odds[key]
 
     # 7. Création de l'objet Pari
     bet = EsportsBet(
@@ -844,11 +1172,30 @@ async def resolve_completed_matches(db: Session):
             })
             db.commit()
 
-            # Déclenche la résolution effective
+            match_extras = {}
             try:
-                resolve_match(match_id, db)
+                games = await lolesports.get_match_games(match_id)
+                # Map team_id → "team1"/"team2" pour normaliser
+                t1_id = teams[0].get("id", "")
+                t2_id = teams[1].get("id", "")
+                game_winners = []
+                for g in games:
+                    if g["state"] != "completed":
+                        continue
+                    if g["winner_team_id"] == t1_id:
+                        game_winners.append("team1")
+                    elif g["winner_team_id"] == t2_id:
+                        game_winners.append("team2")
+                if game_winners:
+                    match_extras["game_winners"] = game_winners
+            except Exception as e:
+                logger.warning(f"[resolve] {match_id}: échec récupération games — {e}")
+
+            try:
+                resolve_match(match_id, db, match_extras=match_extras)
                 total_resolved += 1
                 logger.info(f"[resolve] match {match_id}: ✅ résolu")
+
             except Exception as e:
                 logger.error(f"[resolve] match {match_id}: erreur lors du resolve — {e}")
                 total_errors += 1

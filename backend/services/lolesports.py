@@ -26,6 +26,37 @@ CURRENT_TOURNAMENT_IDS = {
 
 ALL_LEAGUE_IDS = list(LEAGUE_IDS.values())
 
+async def get_match_games(match_id: str) -> list[dict]:
+    """
+    Renvoie la liste des games d'un match avec leur résultat.
+    Format : [{"map": 1, "winner_team_id": "...", "state": "completed"}, ...]
+    """
+    try:
+        data = await get_event_details(match_id)
+        match = data.get("data", {}).get("event", {}).get("match", {})
+        games = match.get("games", [])
+
+        result = []
+        for g in games:
+            game_state = g.get("state", "")
+            number     = g.get("number", 0)
+            teams      = g.get("teams", [])
+
+            winner_team_id = None
+            for t in teams:
+                if (t.get("result") or {}).get("outcome") == "win":
+                    winner_team_id = t.get("id", "")
+                    break
+
+            result.append({
+                "map":            number,
+                "state":          game_state,
+                "winner_team_id": winner_team_id,
+            })
+        return result
+    except Exception:
+        return []
+
 async def get_completed_events(tournament_id: str) -> dict:
     async with httpx.AsyncClient(timeout=12) as client:
         r = await client.get(
