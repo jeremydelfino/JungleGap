@@ -3,7 +3,7 @@ import httpx
 
 # Ta liste de slugs à vérifier
 SLUGS_A_TROUVER = [
-    'T1-academy'
+    'top-esports'
 ]
 
 async def generer_fichier_ids():
@@ -35,7 +35,6 @@ async def generer_fichier_ids():
             api_id = mapping.get(slug, "")
             ligne = f'{slug}="{api_id}"\n'
             
-            f.write(ligne)
             print(ligne.strip()) # Je te l'affiche aussi dans la console pour vérifier
 
     print(f"\n✅ Fichier '{fichier_sortie}' créé avec succès à la racine de ton dossier !")

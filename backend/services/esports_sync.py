@@ -692,6 +692,16 @@ async def sync_one_team_leaguepedia(et: "EsportsTeam", db: Session) -> dict:
                 ep.is_starter = False
             summary["players_deactivated"].append(ep.summoner_name or "?")
 
+        # ── 2bis. Désactivation cascade vers ProPlayer ────────────
+    # Si un pro_player de cette team n'apparaît plus dans le roster Leaguepedia
+    # on le désactive (is_active=false), sans supprimer.
+    pro_in_team = db.query(ProPlayer).filter(ProPlayer.team == et.code).all()
+    for pro in pro_in_team:
+        if (pro.name or "").strip() not in api_ids:
+            if pro.is_active is not False:
+                pro.is_active = False
+                summary.setdefault("pros_deactivated", []).append(pro.name or "?")
+
     # ── 3. Upsert des joueurs du roster ──────────────────────
     region = et.region or ""
     logo_url = et.logo_url
@@ -754,16 +764,46 @@ async def sync_one_team_leaguepedia(et: "EsportsTeam", db: Session) -> dict:
             summary["players_added"] += 1
 
         # ── 4. Cascade ProPlayer ─────────────────────────────
+        pro = None
         if ep.riot_puuid:
             pro = db.query(ProPlayer).filter(ProPlayer.riot_puuid == ep.riot_puuid).first()
-            if pro:
-                if photo_url:
-                    pro.photo_url = photo_url
-                pro.team          = et.code
-                pro.role          = role
-                pro.region        = region
-                pro.accent_color  = TEAM_COLORS.get(et.code, pro.accent_color or "#00e5ff")
+        if not pro:
+            # Match par nom (insensitive) sur la même team OU global si pas dans la team
+            pro = db.query(ProPlayer).filter(
+                ProPlayer.name.ilike(summoner),
+                ProPlayer.team == et.code,
+            ).first() or db.query(ProPlayer).filter(
+                ProPlayer.name.ilike(summoner),
+                ProPlayer.team.is_(None),
+            ).first()
+
+        if pro:
+            # Update existing pro_player
+            if photo_url:
+                pro.photo_url = photo_url
+            pro.team          = et.code
+            pro.role          = role
+            pro.region        = region
+            pro.is_active     = True
+            pro.accent_color  = TEAM_COLORS.get(et.code, pro.accent_color or "#00e5ff")
+            if logo_url:
                 pro.team_logo_url = logo_url
+            if ep.riot_puuid and not pro.riot_puuid:
+                pro.riot_puuid = ep.riot_puuid
+        else:
+            # Create new pro_player (sans puuid si non connu)
+            pro = ProPlayer(
+                name          = summoner,
+                team          = et.code,
+                role          = role,
+                region        = region,
+                photo_url     = photo_url or None,
+                team_logo_url = logo_url or None,
+                accent_color  = TEAM_COLORS.get(et.code, "#00e5ff"),
+                riot_puuid    = ep.riot_puuid,
+                is_active     = True,
+            )
+            db.add(pro)
 
     db.commit()
     logger.info(
