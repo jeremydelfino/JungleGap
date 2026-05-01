@@ -16,6 +16,9 @@ import httpx
 import asyncio
 from fastapi.responses import Response
 
+from models.user_card import UserCard
+from models.card import Card
+
 router = APIRouter(prefix="/players", tags=["players"])
 
 # ─── DDragon ─────────────────────────────────────────────────
@@ -93,6 +96,58 @@ async def autocomplete(q: str, db: Session = Depends(get_db)):
         for r in results
     ]
 
+@router.post("/{region}/{game_name}/{tag_line}/refresh")
+async def force_refresh_player(
+    region: str,
+    game_name: str,
+    tag_line: str,
+    db: Session = Depends(get_db),
+):
+    """Force un refresh du cache SearchedPlayer (bypass TTL 10min)."""
+    region = region.upper()
+    sp = db.query(SearchedPlayer).filter(
+        SearchedPlayer.summoner_name == game_name,
+        SearchedPlayer.tag_line      == tag_line,
+        SearchedPlayer.region        == region,
+    ).first()
+    if sp:
+        # On vide last_updated pour forcer le refetch dans get_player
+        sp.last_updated = datetime.utcnow() - timedelta(hours=1)
+        db.commit()
+    return {"success": True}
+
+from pydantic import BaseModel
+
+class BatchRanksSchema(BaseModel):
+    puuids: list[str]
+
+@router.post("/batch-ranks")
+async def get_batch_ranks(
+    body: BatchRanksSchema,
+    db: Session = Depends(get_db),
+):
+    """
+    Retourne les ranks (tier/rank/lp/region/summoner_name/tag_line) pour une liste de puuids.
+    Utilise le cache SearchedPlayer en DB.
+    """
+    if not body.puuids:
+        return []
+    players = db.query(SearchedPlayer).filter(
+        SearchedPlayer.riot_puuid.in_(body.puuids)
+    ).all()
+    return [
+        {
+            "puuid":            p.riot_puuid,
+            "summoner_name":    p.summoner_name,
+            "tag_line":         p.tag_line,
+            "region":           p.region,
+            "tier":             p.tier,
+            "rank":             p.rank,
+            "lp":               p.lp,
+            "profile_icon_url": p.profile_icon_url,
+        }
+        for p in players
+    ]
 
 @router.get("/{region}/{game_name}/{tag_line}")
 async def get_player(
@@ -240,27 +295,85 @@ async def get_player(
     raw_matches = await riot.get_match_history(player.riot_puuid, region, count=10)
     matches     = []
     for m in raw_matches:
-        part = next(
-            (p for p in m["info"]["participants"] if p["puuid"] == player.riot_puuid),
-            None,
-        )
-        if part:
-            matches.append({
-                "champion": part["championName"],
-                "role":     part.get("teamPosition", ""),
-                "win":      part["win"],
-                "kills":    part["kills"],
-                "deaths":   part["deaths"],
-                "assists":  part["assists"],
-                "cs":       part["totalMinionsKilled"],
-                "duration": m["info"]["gameDuration"],
-                "played_at": (
-                    datetime.utcfromtimestamp(
-                        m["info"]["gameEndTimestamp"] / 1000
-                    ).isoformat()
-                    if m["info"].get("gameEndTimestamp") else None
-                ),
-            })
+        info  = m.get("info", {})
+        meta  = m.get("metadata", {})
+        parts = info.get("participants", [])
+        part  = next((p for p in parts if p["puuid"] == player.riot_puuid), None)
+        if not part:
+            continue
+
+        # Kill participation (sur les kills de l'équipe)
+        team_id    = part["teamId"]
+        team_kills = sum(p["kills"] for p in parts if p["teamId"] == team_id) or 1
+        kp         = round(((part["kills"] + part["assists"]) / team_kills) * 100)
+
+        # Items (6 items + trinket = item0..item6)
+        items = [part.get(f"item{i}", 0) for i in range(7)]
+
+        # Runes (keystone + secondary tree id)
+        primary_rune   = None
+        secondary_tree = None
+        try:
+            styles = part.get("perks", {}).get("styles", [])
+            if styles:
+                primary_rune   = styles[0]["selections"][0]["perk"]
+                if len(styles) > 1:
+                    secondary_tree = styles[1]["style"]
+        except (KeyError, IndexError):
+            pass
+
+        # Tous les joueurs de la game (pour expand)
+        participants_full = [
+            {
+                "champion":      p.get("championName", ""),
+                "summoner_name": p.get("riotIdGameName") or p.get("summonerName", ""),
+                "tag_line":      p.get("riotIdTagline", ""),
+                "puuid":         p.get("puuid", ""),
+                "team_id":       p.get("teamId", 0),
+                "role":          p.get("teamPosition", ""),
+                "kills":         p.get("kills", 0),
+                "deaths":        p.get("deaths", 0),
+                "assists":       p.get("assists", 0),
+                "cs":            p.get("totalMinionsKilled", 0) + p.get("neutralMinionsKilled", 0),
+                "items":         [p.get(f"item{i}", 0) for i in range(7)],
+                "win":           p.get("win", False),
+                "level":         p.get("champLevel", 1),
+            }
+            for p in parts
+        ]
+
+        matches.append({
+            # ── Existant ──
+            "champion":  part["championName"],
+            "role":      part.get("teamPosition", ""),
+            "win":       part["win"],
+            "kills":     part["kills"],
+            "deaths":    part["deaths"],
+            "assists":   part["assists"],
+            "cs":        part["totalMinionsKilled"] + part.get("neutralMinionsKilled", 0),
+            "duration":  info.get("gameDuration", 0),
+            "played_at": (
+                datetime.utcfromtimestamp(info["gameEndTimestamp"] / 1000).isoformat()
+                if info.get("gameEndTimestamp") else None
+            ),
+            # ── New ──
+            "match_id":       meta.get("matchId", ""),
+            "queue_id":       info.get("queueId", 0),
+            "items":          items,
+            "spell1_id":      part.get("summoner1Id", 0),
+            "spell2_id":      part.get("summoner2Id", 0),
+            "primary_rune":   primary_rune,
+            "secondary_tree": secondary_tree,
+            "vision_score":   part.get("visionScore", 0),
+            "damage_dealt":   part.get("totalDamageDealtToChampions", 0),
+            "gold_earned":    part.get("goldEarned", 0),
+            "level":          part.get("champLevel", 1),
+            "kp":             kp,
+            "team_kills":     team_kills,
+            "participants":   participants_full,
+        })
+
+    overall_stats = _aggregate_overall_stats(matches)
 
     esports_player = db.query(EsportsPlayer).filter(
         EsportsPlayer.riot_puuid == player.riot_puuid
@@ -286,6 +399,7 @@ async def get_player(
             "id":            pro_player.id,
             "name":          pro_player.name,
             "team":          pro_player.team,
+            "team_code":     esports_player.team_code if esports_player else pro_player.team,
             "role":          pro_player.role,
             "region":        pro_player.region,
             "photo_url":     pro_player.photo_url,
@@ -318,8 +432,9 @@ async def get_player(
         },
         "live_game":         live_game_data,
         "match_history":     matches,
+        "overall_stats":     overall_stats,
         "pro_player":        pro_data,
-        "junglegap_profile": None,
+        "junglegap_profile": _build_junglegap_profile(player.riot_puuid, db),
     }
 
 
@@ -341,3 +456,107 @@ def _minimal_team(participants: list, team_id: int) -> list:
             "spell2Id":     p.get("spell2Id"),
         })
     return result
+
+# ─── Helpers JungleGap profile ──────────────────────────────
+
+def _build_junglegap_profile(puuid: str, db: Session) -> dict | None:
+    """Cherche un User lié à ce puuid (via riot_accounts ou User.riot_puuid legacy)."""
+    user = (
+        db.query(User)
+        .join(RiotAccount, RiotAccount.user_id == User.id, isouter=True)
+        .filter((RiotAccount.riot_puuid == puuid) | (User.riot_puuid == puuid))
+        .first()
+    )
+    if not user:
+        return None
+
+    # Bet stats (réplique du helper de profile.py)
+    bets       = db.query(Bet).filter(Bet.user_id == user.id).all()
+    resolved   = [b for b in bets if b.status in ("won", "lost")]
+    won        = [b for b in resolved if b.status == "won"]
+    total_wag  = sum(b.amount for b in bets)
+    total_won_ = sum(b.payout or 0 for b in won)
+    winrate    = round(len(won) / len(resolved) * 100) if resolved else None
+
+    streak = 0
+    for b in sorted(resolved, key=lambda x: x.created_at, reverse=True):
+        if b.status == "won": streak += 1
+        else: break
+
+    # Titre équipé
+    equipped_title = None
+    if user.equipped_title_id:
+        title_card = db.query(Card).filter(Card.id == user.equipped_title_id).first()
+        if title_card and title_card.title_text:
+            equipped_title = title_card.title_text
+
+    return {
+        "id":             user.id,
+        "username":       user.username,
+        "avatar_url":     user.avatar_url,
+        "coins":          user.coins,
+        "equipped_title": equipped_title,
+        "bet_stats": {
+            "total":   len(bets),
+            "won":     len(won),
+            "lost":    len(resolved) - len(won),
+            "winrate": winrate,
+            "streak":  streak,
+            "net":     total_won_ - total_wag,
+        },
+    }
+
+
+# ─── Helpers Match history aggregation ──────────────────────
+
+ROLE_MAP_RIOT = {"TOP": "TOP", "JUNGLE": "JUNGLE", "MIDDLE": "MID", "BOTTOM": "ADC", "UTILITY": "SUPPORT"}
+
+def _aggregate_overall_stats(matches: list) -> dict:
+    """Calcule winrate global + perf par rôle sur les matches fournis."""
+    if not matches:
+        return {"total": 0, "wins": 0, "losses": 0, "winrate": 0, "avg_kda": 0, "avg_cs_min": 0, "by_role": {}}
+
+    total = len(matches)
+    wins  = sum(1 for m in matches if m["win"])
+
+    sum_k = sum(m["kills"]   for m in matches)
+    sum_d = sum(m["deaths"]  for m in matches)
+    sum_a = sum(m["assists"] for m in matches)
+    sum_cs = sum(m["cs"] for m in matches)
+    sum_dur = sum(m["duration"] for m in matches) or 1
+
+    avg_kda    = round((sum_k + sum_a) / max(sum_d, 1), 2)
+    avg_cs_min = round(sum_cs / (sum_dur / 60), 1)
+
+    # Par rôle
+    by_role = {}
+    for m in matches:
+        role = ROLE_MAP_RIOT.get(m["role"], m["role"] or "FILL")
+        if role not in by_role:
+            by_role[role] = {"games": 0, "wins": 0, "k": 0, "d": 0, "a": 0}
+        r = by_role[role]
+        r["games"]   += 1
+        r["wins"]    += int(m["win"])
+        r["k"]       += m["kills"]
+        r["d"]       += m["deaths"]
+        r["a"]       += m["assists"]
+
+    by_role_out = {
+        role: {
+            "games":   r["games"],
+            "wins":    r["wins"],
+            "winrate": round((r["wins"] / r["games"]) * 100),
+            "kda":     round((r["k"] + r["a"]) / max(r["d"], 1), 2),
+        }
+        for role, r in by_role.items()
+    }
+
+    return {
+        "total":      total,
+        "wins":       wins,
+        "losses":     total - wins,
+        "winrate":    round((wins / total) * 100),
+        "avg_kda":    avg_kda,
+        "avg_cs_min": avg_cs_min,
+        "by_role":    by_role_out,
+    }

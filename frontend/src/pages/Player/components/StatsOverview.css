@@ -1,0 +1,77 @@
+/* ─── ANIMATIONS ─── */
+@keyframes so-fade-up    { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+@keyframes so-pop-in     { from{opacity:0;transform:scale(0.92)} to{opacity:1;transform:scale(1)} }
+
+/* ─── CARD ─── */
+.so-card                 { background:linear-gradient(180deg, #1c1c1c 0%, #1a1a1a 100%); border:1px solid #ffffff10; border-radius:14px; padding:18px 22px; transition:all 0.25s; animation:so-fade-up 0.5s ease both; min-height:188px; display:flex; flex-direction:column; }
+.so-card:hover           { border-color:#ffffff18; }
+
+/* ─── HEADER ─── */
+.so-header               { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid #ffffff08; }
+.so-section-label        { font-family:'Inter',sans-serif; font-size:11px; color:#9ca3af; letter-spacing:2px; text-transform:uppercase; font-weight:700; }
+.so-section-sub          { font-family:'Inter',sans-serif; font-size:10px; color:#4b5563; font-weight:500; }
+
+/* ─── EMPTY ─── */
+.so-empty                { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; }
+.so-empty-icon           { font-size:32px; opacity:0.4; }
+.so-empty-text           { font-size:13px; color:#6b7280; font-family:'Inter',sans-serif; }
+.so-empty-mini           { font-size:11px; color:#4b5563; font-family:'Inter',sans-serif; padding:8px 0; }
+
+/* ─── GRID ─── */
+.so-grid                 { display:grid; grid-template-columns:200px 1fr 1fr; gap:24px; flex:1; }
+
+.so-block                { display:flex; flex-direction:column; min-width:0; }
+.so-block-label          { font-family:'Inter',sans-serif; font-size:10px; color:#6b7280; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:12px; font-weight:700; }
+
+/* ─── BLOCK WR (donut + stats) ─── */
+.so-block-wr             { align-items:center; justify-content:center; gap:14px; border-right:1px solid #ffffff06; padding-right:24px; margin-right:0; }
+.so-donut-wrap           { position:relative; width:130px; height:130px; }
+.so-donut                { width:100%; height:100%; }
+.so-donut-center         { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; }
+.so-donut-val            { font-family:'Outfit',sans-serif; font-size:30px; font-weight:900; line-height:1; display:flex; align-items:baseline; }
+.so-donut-pct            { font-size:14px; font-weight:700; opacity:0.75; margin-left:2px; }
+.so-donut-lbl            { font-family:'Inter',sans-serif; font-size:9px; color:#4b5563; letter-spacing:2px; text-transform:uppercase; font-weight:700; }
+
+.so-wr-meta              { display:flex; flex-direction:column; align-items:center; gap:8px; width:100%; }
+.so-wr-wl                { display:flex; align-items:center; gap:6px; font-family:'Outfit',sans-serif; font-size:14px; font-weight:800; }
+.so-wr-w                 { color:#65BD62; }
+.so-wr-l                 { color:#ef4444; }
+.so-wr-dot               { color:#374151; }
+.so-wr-kda               { display:flex; align-items:center; gap:6px; font-family:'Inter',sans-serif; font-size:11px; }
+.so-wr-kda-v             { color:#e8eaf0; font-weight:700; font-family:'Outfit',sans-serif; font-size:13px; }
+.so-wr-kda-l             { color:#6b7280; }
+
+/* ─── ROLES ─── */
+.so-block-roles          { gap:6px; }
+.so-roles-list           { display:flex; flex-direction:column; gap:11px; }
+.so-role-row             { display:grid; grid-template-rows:auto auto auto; gap:4px; }
+.so-role-head            { display:flex; align-items:center; gap:7px; }
+.so-role-icon            { font-size:12px; opacity:0.75; }
+.so-role-name            { font-family:'Inter',sans-serif; font-size:11px; color:#e8eaf0; font-weight:600; flex:1; }
+.so-role-games           { font-family:'Inter',sans-serif; font-size:10px; color:#4b5563; font-weight:500; }
+.so-role-bar-track       { width:100%; height:5px; background:#ffffff08; border-radius:3px; overflow:hidden; }
+.so-role-bar-fill        { height:100%; border-radius:3px; transition:width 0.7s cubic-bezier(0.4,0,0.2,1); }
+.so-role-foot            { display:flex; align-items:center; justify-content:space-between; font-family:'Inter',sans-serif; font-size:10px; }
+.so-role-wr              { font-weight:800; font-family:'Outfit',sans-serif; font-size:11px; }
+.so-role-kda             { color:#6b7280; }
+
+/* ─── CHAMPS ─── */
+.so-block-champs         { gap:6px; }
+.so-champs-list          { display:flex; flex-direction:column; gap:5px; }
+.so-champ-row            { display:flex; align-items:center; gap:9px; padding:5px 7px; border-radius:8px; transition:background 0.2s; animation:so-pop-in 0.3s ease both; }
+.so-champ-row:hover      { background:#ffffff05; }
+.so-champ-icon           { width:30px; height:30px; border-radius:7px; overflow:hidden; background:#242424; flex-shrink:0; display:flex; align-items:center; justify-content:center; border:1px solid #ffffff0a; }
+.so-champ-icon img       { width:120%; height:120%; object-fit:cover; margin:-10%; }
+.so-champ-icon span      { font-family:'Inter',sans-serif; font-size:9px; font-weight:700; color:#4b5563; }
+.so-champ-info           { flex:1; min-width:0; }
+.so-champ-name           { font-family:'Inter',sans-serif; font-size:12px; color:#e8eaf0; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.so-champ-meta           { font-family:'Inter',sans-serif; font-size:10px; color:#4b5563; margin-top:1px; }
+.so-champ-stats          { text-align:right; flex-shrink:0; }
+.so-champ-wr             { font-family:'Outfit',sans-serif; font-size:13px; font-weight:800; }
+.so-champ-games          { font-family:'Inter',sans-serif; font-size:9px; color:#4b5563; margin-top:1px; }
+
+/* ─── RESPONSIVE ─── */
+@media (max-width: 1100px) {
+  .so-grid               { grid-template-columns:1fr; gap:18px; }
+  .so-block-wr           { border-right:none; padding-right:0; padding-bottom:16px; border-bottom:1px solid #ffffff08; flex-direction:row; justify-content:flex-start; }
+}

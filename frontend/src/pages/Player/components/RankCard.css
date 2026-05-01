@@ -1,0 +1,39 @@
+/* ─── ANIMATIONS ─── */
+@keyframes rc-fade-up    { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+@keyframes rc-progress   { from{width:0} }
+@keyframes rc-shimmer    { 0%,100%{opacity:0.6} 50%{opacity:0.9} }
+
+/* ─── CARD ─── */
+.rc-card                 { position:relative; background:linear-gradient(180deg, #1c1c1c 0%, #1a1a1a 100%); border:1px solid #ffffff10; border-radius:14px; padding:18px 20px; display:flex; flex-direction:column; gap:14px; overflow:hidden; transition:all 0.25s cubic-bezier(0.4,0,0.2,1); animation:rc-fade-up 0.5s ease both; min-height:188px; }
+.rc-card:hover           { border-color:#ffffff20; transform:translateY(-2px); box-shadow:0 12px 30px #00000060; }
+.rc-glow                 { position:absolute; inset:0; pointer-events:none; animation:rc-shimmer 5s ease infinite; }
+
+/* ─── EMPTY ─── */
+.rc-card-empty           { align-items:center; justify-content:center; gap:10px; text-align:center; }
+.rc-empty-bg             { position:absolute; inset:0; background:radial-gradient(ellipse at center, #ffffff04, transparent 70%); pointer-events:none; }
+.rc-empty-icon           { font-size:32px; opacity:0.35; }
+.rc-empty-text           { font-family:'Outfit',sans-serif; font-size:18px; font-weight:800; color:#6b7280; }
+
+/* ─── HEADER ─── */
+.rc-header               { position:relative; z-index:1; display:flex; align-items:center; justify-content:space-between; }
+.rc-queue                { font-family:'Inter',sans-serif; font-size:10px; font-weight:700; color:#9ca3af; letter-spacing:1.8px; text-transform:uppercase; }
+.rc-tier-badge           { font-family:'Inter',sans-serif; font-size:9px; font-weight:800; letter-spacing:1.5px; text-transform:uppercase; padding:3px 9px; border-radius:6px; border:1px solid; }
+
+/* ─── BODY ─── */
+.rc-body                 { position:relative; z-index:1; display:flex; align-items:center; gap:18px; flex:1; }
+.rc-tier-img             { position:relative; width:80px; height:80px; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+.rc-tier-img img         { width:100%; height:100%; object-fit:contain; position:relative; z-index:2; filter:drop-shadow(0 6px 14px #00000080); }
+.rc-tier-img-glow        { position:absolute; inset:-25%; z-index:1; opacity:0.7; }
+
+/* ─── TEXT ─── */
+.rc-text                 { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
+.rc-tier-name            { font-family:'Outfit',sans-serif; font-size:24px; font-weight:900; line-height:1; letter-spacing:-0.3px; }
+.rc-rank                 { font-weight:700; opacity:0.75; font-size:20px; }
+.rc-lp-row               { display:flex; align-items:baseline; gap:5px; margin-top:4px; }
+.rc-lp-val               { font-family:'Outfit',sans-serif; font-size:28px; font-weight:800; color:#e8eaf0; line-height:1; }
+.rc-lp-lbl               { font-family:'Inter',sans-serif; font-size:11px; color:#6b7280; font-weight:600; letter-spacing:1.5px; }
+.rc-next                 { font-family:'Inter',sans-serif; font-size:11px; color:#6b7280; margin-top:6px; }
+
+/* ─── PROGRESS ─── */
+.rc-progress-track       { position:relative; z-index:1; width:100%; height:5px; background:#ffffff08; border-radius:3px; overflow:hidden; }
+.rc-progress-fill        { height:100%; border-radius:3px; transition:width 0.8s cubic-bezier(0.4,0,0.2,1); animation:rc-progress 0.8s cubic-bezier(0.4,0,0.2,1) both; }

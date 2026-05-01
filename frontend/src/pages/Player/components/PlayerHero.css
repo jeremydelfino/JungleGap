@@ -1,0 +1,69 @@
+/* ─── ANIMATIONS ─── */
+@keyframes ph-fade-up    { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+@keyframes ph-spin       { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+@keyframes ph-glow-pulse { 0%,100%{opacity:0.20} 50%{opacity:0.28} }
+
+/* ─── WRAP ─── */
+.ph-wrap                 { position:relative; }
+
+/* ─── BANNER ─── */
+.ph-banner               { position:relative; min-height:280px; overflow:hidden; display:flex; align-items:center; }
+.ph-banner-bg            { position:absolute; inset:0; z-index:0; }
+.ph-banner-team-logo     { position:absolute; right:-40px; top:50%; transform:translateY(-50%); height:520px; width:auto; object-fit:contain; z-index:1; opacity:0.20; filter:blur(0.5px); animation:ph-glow-pulse 6s ease infinite; pointer-events:none; }
+.ph-banner-overlay       { position:absolute; bottom:0; left:0; right:0; height:100px; background:linear-gradient(to top, #171717 0%, #17171780 50%, transparent 100%); z-index:4; pointer-events:none; }
+/* ─── HERO (centré dans la bannière) ─── */
+.ph-hero                 { position:relative; z-index:3; width:100%; padding:0 48px; animation:ph-fade-up 0.5s ease both; }
+.ph-hero-left            { display:flex; align-items:center; gap:24px; max-width:1400px; margin:0 auto; }
+
+/* ─── PHOTO ─── */
+.ph-photo                { position:relative; flex-shrink:0; width:140px; height:180px; border-radius:14px; overflow:hidden; background:#1c1c1c; border:2px solid #ffffff15; box-shadow:0 16px 48px #00000099, 0 0 0 1px #00000030; }
+.ph-photo img            { width:100%; height:100%; object-fit:cover; object-position:top; display:block; }
+.ph-photo-initials       { width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-family:'Outfit',sans-serif; font-size:48px; font-weight:800; color:#65BD62; }
+.ph-photo-accent         { position:absolute; bottom:0; left:0; right:0; height:3px; }
+
+/* ─── INFO (centré verticalement avec la photo) ─── */
+.ph-info                 { display:flex; flex-direction:column; gap:12px; flex:1; min-width:0; justify-content:center; }
+
+/* Name + badge */
+.ph-name-row             { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.ph-name                 { font-family:'Outfit',sans-serif; font-size:38px; font-weight:900; color:#ffffff; margin:0; line-height:1; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; letter-spacing:-0.5px; text-shadow:0 2px 16px #000000a0; }
+.ph-tag                  { font-size:22px; color:#5a6068; font-weight:500; text-shadow:none; }
+
+.ph-badge                { display:inline-flex; align-items:center; padding:6px 14px; border-radius:20px; font-family:'Inter',sans-serif; font-size:11px; font-weight:800; letter-spacing:0.6px; border:1px solid; backdrop-filter:blur(6px); }
+
+/* Meta pills */
+.ph-meta                 { display:flex; gap:7px; flex-wrap:wrap; }
+.ph-meta-pill            { padding:5px 12px; border-radius:8px; font-family:'Inter',sans-serif; font-size:11px; font-weight:600; color:#9ca3af; background:#0d0d0d99; backdrop-filter:blur(8px); border:1px solid #ffffff10; letter-spacing:0.3px; }
+.ph-rank-pill            { font-weight:700; }
+
+/* Actions */
+.ph-actions              { display:flex; gap:8px; margin-top:2px; flex-wrap:wrap; }
+.ph-btn                  { display:inline-flex; align-items:center; gap:6px; padding:8px 16px; border-radius:9px; font-family:'Inter',sans-serif; font-size:12px; font-weight:600; cursor:pointer; transition:all 0.2s; border:1px solid; backdrop-filter:blur(8px); }
+
+.ph-btn-refresh          { background:#65BD6215; color:#65BD62; border-color:#65BD6240; }
+.ph-btn-refresh:hover    { background:#65BD6225; border-color:#65BD6260; transform:translateY(-1px); box-shadow:0 4px 14px #65BD6228; }
+.ph-btn-refresh:disabled { opacity:0.6; cursor:not-allowed; }
+.ph-btn-refresh.refreshing .ph-btn-icon { display:inline-block; animation:ph-spin 0.8s linear infinite; }
+
+.ph-btn-fav              { background:#0d0d0d80; color:#9ca3af; border-color:#ffffff15; }
+.ph-btn-fav:hover        { background:#ef444415; color:#ef4444; border-color:#ef444440; transform:translateY(-1px); }
+.ph-btn-fav.is-active    { background:#ef444418; color:#ef4444; border-color:#ef444450; }
+.ph-btn-fav.is-active:hover { background:#ef444425; }
+.ph-btn-fav:disabled     { opacity:0.6; cursor:not-allowed; }
+
+.ph-btn-back             { background:#0d0d0d80; color:#9ca3af; border-color:#ffffff12; }
+.ph-btn-back:hover       { background:#ffffff0c; color:#e8eaf0; border-color:#ffffff25; transform:translateY(-1px); }
+
+.ph-btn-icon             { font-size:14px; }
+
+.ph-banner               { border-bottom:1px solid #ffffff10; box-shadow:0 12px 40px #00000080, inset 0 -1px 0 #ffffff05; }
+
+/* ─── RESPONSIVE ─── */
+@media (max-width: 800px) {
+  .ph-banner             { min-height:260px; }
+  .ph-hero               { padding:0 20px; }
+  .ph-hero-left          { gap:18px; }
+  .ph-photo              { width:108px; height:140px; }
+  .ph-name               { font-size:28px; }
+  .ph-tag                { font-size:18px; }
+}
