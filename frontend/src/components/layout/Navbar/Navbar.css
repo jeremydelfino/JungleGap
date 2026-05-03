@@ -194,7 +194,7 @@
 .notif-item-msg { font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 500; color: #e8eaf0; line-height: 1.5; }
 .notif-item-time { font-family: 'Inter', sans-serif; font-size: 11px; color: #4b5563; margin-top: 3px; }
 .notif-unread-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: #00e5ff; box-shadow: 0 0 6px #00e5ff80; margin-top: 5px; }
-
+.navbar-avatar-trigger { display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1; }
 /* ══ COINS ══ */
 .navbar-coins { display: flex; align-items: center; gap: 7px; background: #c89b3c0a; border: 1px solid #c89b3c20; border-radius: 8px; padding: 6px 12px; cursor: pointer; transition: all 0.2s; }
 .navbar-coins:hover { background: #c89b3c14; border-color: #c89b3c40; }
@@ -275,4 +275,6 @@
   .avatar-chevron { display: none; }
 
   body { padding-bottom: 60px; }
+
+  
 }

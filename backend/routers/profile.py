@@ -5,6 +5,7 @@ from database import get_db
 from models.user import User
 from models.bet import Bet
 from deps import get_current_user
+from models.riot_account import RiotAccount
 from services import riot
 import random
 
@@ -62,25 +63,107 @@ def _get_bet_stats(user_id: int, db: Session) -> dict:
         "net":            net,
         "streak":         streak,
     }
+# ─── Helper : migration auto user.riot_puuid → riot_accounts ───
 
+async def _ensure_riot_accounts_migrated(user: User, db: Session):
+    """
+    Migration au vol : si l'user a un riot_puuid (ancien système) mais aucune
+    entrée dans riot_accounts, on crée l'entrée à la volée. Idempotent : ne
+    fait rien si déjà migré. Appelé une seule fois par user (au 1er accès au profil).
+    """
+    if not user.riot_puuid:
+        return
+
+    existing_count = db.query(RiotAccount).filter(RiotAccount.user_id == user.id).count()
+    if existing_count > 0:
+        return  # déjà migré
+
+    # Récupère les infos Riot via le puuid
+    try:
+        from models.player import SearchedPlayer
+
+        # 1) Tente de récupérer depuis le cache local
+        cached = db.query(SearchedPlayer).filter(
+            SearchedPlayer.riot_puuid == user.riot_puuid
+        ).first()
+
+        if cached:
+            new_account = RiotAccount(
+                user_id          = user.id,
+                riot_puuid       = user.riot_puuid,
+                summoner_name    = cached.summoner_name,
+                tag_line         = cached.tag_line,
+                region           = cached.region,
+                profile_icon_url = cached.profile_icon_url,
+                tier             = cached.tier,
+                rank             = cached.rank,
+                lp               = cached.lp,
+                is_primary       = True,
+            )
+            db.add(new_account)
+            db.commit()
+            return
+
+        # 2) Pas de cache → on crée une entrée minimale qu'on enrichira plus tard
+        # On laisse summoner_name vide, l'user pourra "refresh" via la page joueur
+        new_account = RiotAccount(
+            user_id    = user.id,
+            riot_puuid = user.riot_puuid,
+            is_primary = True,
+        )
+        db.add(new_account)
+        db.commit()
+
+    except Exception as e:
+        db.rollback()
+        # Ne bloque pas le chargement du profil si la migration échoue
+        print(f"[migration] Échec migration riot_account user {user.id}: {e}")
+
+
+def _serialize_riot_accounts(user: User, db: Session) -> list:
+    """Sérialise les riot_accounts d'un user en JSON pour le frontend."""
+    accounts = (
+        db.query(RiotAccount)
+        .filter(RiotAccount.user_id == user.id)
+        .order_by(RiotAccount.is_primary.desc(), RiotAccount.created_at.asc())
+        .all()
+    )
+    return [
+        {
+            "id":               ra.id,
+            "summoner_name":    ra.summoner_name,
+            "tag_line":         ra.tag_line,
+            "region":           ra.region,
+            "profile_icon_url": ra.profile_icon_url,
+            "tier":             ra.tier,
+            "rank":             ra.rank,
+            "lp":               ra.lp,
+            "is_primary":       ra.is_primary,
+        }
+        for ra in accounts
+    ]
 # ─── GET /me ────────────────────────────────────────────────
 
 @router.get("/me")
-def get_my_profile(
+async def get_my_profile(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Migration au vol (idempotent)
+    await _ensure_riot_accounts_migrated(current_user, db)
+
     return {
-        "id":          current_user.id,
-        "username":    current_user.username,
-        "email":       current_user.email,
-        "coins":       current_user.coins,
-        "avatar_url":  current_user.avatar_url,
-        "riot_linked": current_user.riot_puuid is not None,
-        "riot_puuid":  current_user.riot_puuid,
-        "last_daily":  current_user.last_daily,
-        "riot_player": _get_riot_player(current_user, db),
-        "bet_stats":   _get_bet_stats(current_user.id, db),
+        "id":            current_user.id,
+        "username":      current_user.username,
+        "email":         current_user.email,
+        "coins":         current_user.coins,
+        "avatar_url":    current_user.avatar_url,
+        "riot_linked":   current_user.riot_puuid is not None,
+        "riot_puuid":    current_user.riot_puuid,
+        "last_daily":    current_user.last_daily,
+        "riot_player":   _get_riot_player(current_user, db),
+        "riot_accounts": _serialize_riot_accounts(current_user, db),
+        "bet_stats":     _get_bet_stats(current_user.id, db),
         "favorite_team": {
             "name":  current_user.favorite_team_name,
             "logo":  current_user.favorite_team_logo,
@@ -99,13 +182,14 @@ def get_public_profile(
     if not user:
         raise HTTPException(404, "Utilisateur introuvable")
     return {
-        "id":          user.id,
-        "username":    user.username,
-        "avatar_url":  user.avatar_url,
-        "coins":       user.coins,
-        "riot_linked": user.riot_puuid is not None,
-        "riot_player": _get_riot_player(user, db),
-        "bet_stats":   _get_bet_stats(user.id, db),
+        "id":            user.id,
+        "username":      user.username,
+        "avatar_url":    user.avatar_url,
+        "coins":         user.coins,
+        "riot_linked":   user.riot_puuid is not None,
+        "riot_player":   _get_riot_player(user, db),
+        "riot_accounts": _serialize_riot_accounts(user, db),
+        "bet_stats":     _get_bet_stats(user.id, db),
         "favorite_team": {
             "name":  user.favorite_team_name,
             "logo":  user.favorite_team_logo,

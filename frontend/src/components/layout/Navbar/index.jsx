@@ -19,8 +19,12 @@ export default function Navbar() {
   const [notifOpen,   setNotifOpen]   = useState(false)
   const [notifs,      setNotifs]      = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
-  const notifRef = useRef(null)
-  const menuRef  = useRef(null)
+
+  /* ── Refs séparées desktop / mobile ── */
+  const notifRefDesktop = useRef(null)
+  const notifRefMobile  = useRef(null)
+  const menuRefDesktop  = useRef(null)
+  const menuRefMobile   = useRef(null)
 
   /* ── Scroll ── */
   useEffect(() => {
@@ -29,11 +33,15 @@ export default function Navbar() {
     return () => window.removeEventListener('scroll', handler)
   }, [])
 
-  /* ── Fermer dropdowns au clic extérieur ── */
+  /* ── Fermer dropdowns au clic extérieur (vérifie LES DEUX refs) ── */
   useEffect(() => {
     const handler = (e) => {
-      if (notifRef.current && !notifRef.current.contains(e.target)) setNotifOpen(false)
-      if (menuRef.current  && !menuRef.current.contains(e.target))  setMenuOpen(false)
+      const inNotif = (notifRefDesktop.current && notifRefDesktop.current.contains(e.target))
+                   || (notifRefMobile.current  && notifRefMobile.current.contains(e.target))
+      const inMenu  = (menuRefDesktop.current  && menuRefDesktop.current.contains(e.target))
+                   || (menuRefMobile.current   && menuRefMobile.current.contains(e.target))
+      if (!inNotif) setNotifOpen(false)
+      if (!inMenu)  setMenuOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -195,7 +203,7 @@ export default function Navbar() {
         <div className="navbar-right">
           {user ? (
             <>
-              {/* Daily — desktop seulement (géré dans bottom nav sur mobile) */}
+              {/* Daily — desktop seulement */}
               <div className="daily-wrap">
                 <button
                   className={`daily-btn ${dailyAvailable ? 'available' : 'claimed'} ${dailyClaiming ? 'claiming' : ''}`}
@@ -210,7 +218,7 @@ export default function Navbar() {
               </div>
 
               {/* Notifs — desktop */}
-              <div className="notif-wrap" ref={notifRef}>
+              <div className="notif-wrap" ref={notifRefDesktop}>
                 <button
                   className={`notif-btn ${unreadCount > 0 ? 'has-unread' : ''}`}
                   onClick={() => setNotifOpen(o => !o)}
@@ -233,22 +241,24 @@ export default function Navbar() {
                 <span className="coins-label">coins</span>
               </div>
 
-              {/* Avatar */}
-              <div className="navbar-avatar-wrap" ref={menuRef} onClick={() => setMenuOpen(o => !o)}>
-                <div className="navbar-avatar">
-                  {user.avatar_url
-                    ? <img src={user.avatar_url} alt="avatar" referrerPolicy="no-referrer" onError={e => { e.target.style.display = 'none' }} />
-                    : <span>{user.username?.slice(0, 2).toUpperCase()}</span>
-                  }
+              {/* Avatar desktop */}
+              <div className="navbar-avatar-wrap" ref={menuRefDesktop}>
+                <div className="navbar-avatar-trigger" onClick={() => setMenuOpen(o => !o)}>
+                  <div className="navbar-avatar">
+                    {user.avatar_url
+                      ? <img src={user.avatar_url} alt="avatar" referrerPolicy="no-referrer" onError={e => { e.target.style.display = 'none' }} />
+                      : <span>{user.username?.slice(0, 2).toUpperCase()}</span>
+                    }
+                  </div>
+                  <div className="avatar-status" />
+                  <span className="navbar-username">{user.username}</span>
+                  <svg className={`avatar-chevron ${menuOpen ? 'open' : ''}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <polyline points="6 9 12 15 18 9"/>
+                  </svg>
                 </div>
-                <div className="avatar-status" />
-                <span className="navbar-username">{user.username}</span>
-                <svg className={`avatar-chevron ${menuOpen ? 'open' : ''}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <polyline points="6 9 12 15 18 9"/>
-                </svg>
 
                 {menuOpen && (
-                  <div className="avatar-dropdown" onClick={e => e.stopPropagation()}>
+                  <div className="avatar-dropdown">
                     <div className="dropdown-header">
                       <div className="dropdown-username">{user.username}</div>
                       <div className="dropdown-coins">
@@ -278,32 +288,28 @@ export default function Navbar() {
       {user && (
         <nav className="bottom-nav">
 
-          {/* Live */}
           <button className={`bottom-nav-item ${isActive('/') ? 'active' : ''}`} onClick={() => navigate('/')}>
             <div className="bnav-icon-wrap">⚡{isActive('/') && <span className="bnav-active-dot" />}</div>
             <span className="bnav-label">Live</span>
           </button>
 
-          {/* Ligues */}
           <button className={`bottom-nav-item ${isActive('/betonpros') ? 'active' : ''}`} onClick={() => navigate('/betonpros')}>
             <div className="bnav-icon-wrap">🎖️{isActive('/betonpros') && <span className="bnav-active-dot" />}</div>
             <span className="bnav-label">Ligues</span>
           </button>
 
-          {/* Paris */}
           <button className={`bottom-nav-item ${isActive('/bets') ? 'active' : ''}`} onClick={() => navigate('/bets')}>
             <div className="bnav-icon-wrap">🎯{isActive('/bets') && <span className="bnav-active-dot" />}</div>
             <span className="bnav-label">Paris</span>
           </button>
 
-          {/* Jeux */}
           <button className={`bottom-nav-item ${isActive('/games') ? 'active' : ''}`} onClick={() => navigate('/games')}>
             <div className="bnav-icon-wrap">🎮{isActive('/games') && <span className="bnav-active-dot" />}</div>
             <span className="bnav-label">Jeux</span>
           </button>
 
-          {/* Notifs */}
-          <div className="bottom-nav-item" ref={notifRef} style={{ position: 'relative' }}>
+          {/* Notifs mobile */}
+          <div className="bottom-nav-item" ref={notifRefMobile} style={{ position: 'relative' }}>
             <div className="bnav-icon-wrap" onClick={() => setNotifOpen(o => !o)} style={{ cursor: 'pointer' }}>
               🔔
               {unreadCount > 0 && <span className="bnav-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>}
@@ -312,10 +318,9 @@ export default function Navbar() {
             {notifOpen && <NotifDropdown />}
           </div>
 
-          {/* Daily + Profil */}
-          <div className="bottom-nav-item" ref={menuRef} style={{ position: 'relative' }}>
+          {/* Daily + Profil mobile */}
+          <div className="bottom-nav-item" ref={menuRefMobile} style={{ position: 'relative' }}>
             <div className="bnav-icon-wrap" onClick={() => setMenuOpen(o => !o)} style={{ cursor: 'pointer' }}>
-              {/* Avatar ou icône */}
               {user.avatar_url
                 ? <img src={user.avatar_url} alt="" style={{ width: 28, height: 28, borderRadius: 8, objectFit: 'cover' }} onError={e => { e.target.style.display = 'none' }} />
                 : <span style={{ fontSize: 20 }}>👤</span>
@@ -325,7 +330,7 @@ export default function Navbar() {
             <span className="bnav-label" style={{ pointerEvents: 'none' }}>Profil</span>
 
             {menuOpen && (
-              <div className="avatar-dropdown" onClick={e => e.stopPropagation()}>
+              <div className="avatar-dropdown">
                 <div className="dropdown-header">
                   <div className="dropdown-username">{user.username}</div>
                   <div className="dropdown-coins">
@@ -334,7 +339,6 @@ export default function Navbar() {
                   </div>
                 </div>
                 <div className="dropdown-divider" />
-                {/* Daily bonus dans le menu mobile */}
                 {dailyAvailable && (
                   <button className="dropdown-item" onClick={() => { handleDaily(); setMenuOpen(false) }}>
                     <span>🎁</span> Bonus quotidien
