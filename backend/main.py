@@ -129,6 +129,14 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
     )
 
+    scheduler.add_job(
+        refresh_champion_winrates,
+        trigger='cron',
+        day_of_week='wed', hour=6, minute=0,
+        id='refresh_champion_winrates',
+        replace_existing=True,
+    )
+
     scheduler.start()
     yield
     scheduler.shutdown()

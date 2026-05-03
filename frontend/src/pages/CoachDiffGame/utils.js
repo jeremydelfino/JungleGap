@@ -1,39 +1,53 @@
 import api from '../../api/client'
 
+/* ─── Normalise un nom de champion vers son ID DDragon ─── */
+/* "Xin Zhao" → "XinZhao", "Cho'Gath" → "ChoGath", "Dr. Mundo" → "DrMundo" */
+function toChampId(name) {
+  if (!name) return null
+  return name.replace(/[\s'.\-]/g, '')
+}
+
 /* ─── Fetch DDragon (version + liste champions) ─── */
 export async function fetchDDragonData() {
   const versions = await fetch('https://ddragon.leagueoflegends.com/api/versions.json').then(r => r.json())
   const version  = versions[0]
   const json     = await fetch(`https://ddragon.leagueoflegends.com/cdn/${version}/data/en_US/champion.json`).then(r => r.json())
-  // d.data = { Aatrox: {id, key, name, ...}, ... }
   const champions = Object.values(json.data).map(c => ({
-    id:    c.id,        // "Aatrox" — matche le name côté backend
-    key:   c.key,       // numeric ID
-    name:  c.name,      // "Aatrox" — display name
+    id:    c.id,
+    key:   c.key,
+    name:  c.name,
     title: c.title,
-    tags:  c.tags,      // ["Fighter", "Tank"]
+    tags:  c.tags,
   }))
   champions.sort((a, b) => a.name.localeCompare(b.name))
   return { version, champions }
 }
 
-/* ─── Icône champion (proxy backend, cohérent projet) ─── */
+/* ─── Icône champion (square, pour grid/bans) ─── */
 export function getChampIcon(championId, version) {
-  if (!championId || !version) return null
-  const ddUrl = `https://ddragon.leagueoflegends.com/cdn/${version}/img/champion/${championId}.png`
+  const id = toChampId(championId)
+  if (!id || !version) return null
+  const ddUrl = `https://ddragon.leagueoflegends.com/cdn/${version}/img/champion/${id}.png`
   return `${api.defaults.baseURL}/players/proxy/icon?url=${encodeURIComponent(ddUrl)}`
 }
 
-/* ─── Splash art (pour reveal de fin) ─── */
+/* ─── Loading splash (vertical, pour picks LoL-style) ─── */
+export function getChampLoading(championId) {
+  const id = toChampId(championId)
+  if (!id) return null
+  const ddUrl = `https://ddragon.leagueoflegends.com/cdn/img/champion/loading/${id}_0.jpg`
+  return `${api.defaults.baseURL}/players/proxy/icon?url=${encodeURIComponent(ddUrl)}`
+}
+
+/* ─── Splash art (large, pour reveal de fin) ─── */
 export function getChampSplash(championId) {
-  if (!championId) return null
-  return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${championId}_0.jpg`
+  const id = toChampId(championId)
+  if (!id) return null
+  return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${id}_0.jpg`
 }
 
 /* ─── Helpers state ─── */
-export function getSideKey(side) {
-  return side === 'BLUE' ? 'blue' : 'red'
-}
+export function getSideKey(side) { return side === 'BLUE' ? 'blue' : 'red' }
 
 export function getAllPicked(state) {
   if (!state) return new Set()

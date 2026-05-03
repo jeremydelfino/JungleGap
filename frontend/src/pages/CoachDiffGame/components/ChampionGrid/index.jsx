@@ -25,14 +25,16 @@ export default function ChampionGrid({
   const [search, setSearch] = useState('')
   const [tag,    setTag]    = useState('all')
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    const filtered = useMemo(() => {
+    // Normalise : minuscule + suppression espaces/apostrophes/tirets
+    const norm = (s) => s.toLowerCase().replace(/[\s'-]/g, '')
+    const q = norm(search.trim())
     return champions.filter(c => {
-      if (q && !c.name.toLowerCase().includes(q) && !c.id.toLowerCase().includes(q)) return false
-      if (tag !== 'all' && !c.tags?.includes(tag)) return false
-      return true
+        if (q && !norm(c.name).includes(q) && !norm(c.id).includes(q)) return false
+        if (tag !== 'all' && !c.tags?.includes(tag)) return false
+        return true
     })
-  }, [champions, search, tag])
+    }, [champions, search, tag])
 
   return (
     <div className={`cd-grid-wrap ${disabled ? 'disabled' : ''}`}>
@@ -68,14 +70,16 @@ export default function ChampionGrid({
           const isSel    = selected === c.id
           return (
             <button
-              key={c.id}
-              className={`cd-grid-cell ${isPicked ? 'picked' : ''} ${isSel ? 'selected' : ''}`}
-              onClick={() => !isPicked && !disabled && onSelect(c.id)}
-              disabled={isPicked || disabled}
-              title={c.name}
+            key={c.id}
+            className={`cd-grid-cell ${isPicked ? 'picked' : ''} ${isSel ? 'selected' : ''}`}
+            onClick={() => !isPicked && !disabled && onSelect(c.id)}
+            disabled={isPicked || disabled}
+            title={c.name}
             >
-              <img src={getChampIcon(c.id, version)} alt={c.name} referrerPolicy="no-referrer" />
-              <div className="cd-grid-cell-name">{c.name}</div>
+            <div className="cd-grid-cell-img">
+                <img src={getChampIcon(c.id, version)} alt={c.name} referrerPolicy="no-referrer" />
+            </div>
+            <div className="cd-grid-cell-name">{c.name}</div>
             </button>
           )
         })}

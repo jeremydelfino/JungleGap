@@ -84,6 +84,9 @@ def place_bet(
         raise HTTPException(404, "Partie introuvable")
     if game.status != "live":
         raise HTTPException(400, "Cette partie est terminée")
+        # ── Cotes prêtes ? (calcul async au démarrage de la game) ──
+    if not game.odds_data:
+        raise HTTPException(425, "Les cotes sont en cours de calcul, réessaie dans quelques secondes")
 
     # ── Validation bet_value selon le type ────────────────────
     all_players = (game.blue_team or []) + (game.red_team or [])

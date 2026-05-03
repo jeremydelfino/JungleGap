@@ -229,6 +229,12 @@
 .gp-picker-champ   { display:block; font-size:11px; font-weight:700; color:#e8eaf0; font-family:'Outfit',sans-serif; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .gp-picker-player  { display:block; font-size:9px; color:#6b7280; font-family:'Inter',sans-serif; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
+/* ─── BADGE PENDING ─── */
+.gp-badge.pending { background: #c89b3c1a; color: #e2b147; border: 1px solid #c89b3c40; }
+.gp-badge.pending::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #e2b147; margin-right: 6px; animation: gp-pulse 1.4s ease-in-out infinite; vertical-align: middle; }
+
+@keyframes gp-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
 /* ── Responsive ── */
 @media (max-width:1200px) {
   .gp-bets-layout { grid-template-columns:240px 1fr 280px; }

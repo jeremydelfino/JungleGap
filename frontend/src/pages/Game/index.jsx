@@ -160,6 +160,7 @@ export default function Game() {
 
   const liveSeconds = useLiveTimer(game?.duration_seconds ?? 0)
   const od = game?.odds_data ?? null
+  const oddsReady = !!od && Object.keys(od).length > 0
 
   // ── DDragon : uniquement pour résoudre championId → name ──
   useEffect(() => {
@@ -182,9 +183,10 @@ export default function Game() {
   useEffect(() => { loadGame() }, [loadGame])
   useEffect(() => {
     if (!game || game.status === 'ended') return
-    const iv = setInterval(loadGame, 30000)
+    const interval = oddsReady ? 30000 : 10000
+    const iv = setInterval(loadGame, interval)
     return () => clearInterval(iv)
-  }, [game, loadGame])
+  }, [game, loadGame, oddsReady])
 
   // ── processTeam : uniquement normalisation + tri ──────────
   // Les rôles viennent du backend (role_detector.py via game_poller.py)
@@ -207,8 +209,7 @@ export default function Game() {
   const red    = useMemo(() => processTeam(game?.red_team),  [game?.red_team,  processTeam])
   const jgBlue = useMemo(() => blue.find(p => p.role === 'JUNGLE'), [blue])
   const jgRed  = useMemo(() => red.find(p => p.role === 'JUNGLE'),  [red])
-  const betsOpen = game?.status !== 'ended'
-
+  const betsOpen  = game?.status !== 'ended' && oddsReady
   // ── Sélections ────────────────────────────────────────────
   const toggle = (slug, value) => {
     if (!betsOpen) return
@@ -355,8 +356,10 @@ export default function Game() {
           <span className="gp-queue">{game.queue_type || 'Ranked Solo'}</span>
           <span className="gp-timer">{fmt(liveSeconds)}</span>
         </div>
-        <div className={`gp-badge ${betsOpen ? 'open' : 'closed'}`}>{betsOpen ? '✓ Paris ouverts' : '🔒 Fermés'}</div>
-      </div>
+          <div className={`gp-badge ${betsOpen ? 'open' : (oddsReady ? 'closed' : 'pending')}`}>
+            {betsOpen ? '✓ Paris ouverts' : (oddsReady ? '🔒 Fermés' : '⏳ Calcul des cotes...')}
+          </div>
+        </div>
 
       <div className="gp-bento">
         <div className="gp-draft-block">

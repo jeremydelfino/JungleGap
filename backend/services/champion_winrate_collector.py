@@ -190,18 +190,19 @@ async def _collect_for_region(region: str) -> tuple[dict, dict, dict]:
                 champion_data[key]["kp_sum"]        += kp
                 champion_data[key]["dmg_share_sum"] += dmg_share
 
-            # Synergies AVEC lane — paires de l'équipe, clé triée sur (champ, lane)
+# Synergies AVEC lane — clé triée sur (lane, champ) pour canonicaliser la paire de lanes
+            LANE_ORDER = {"TOP": 0, "JUNGLE": 1, "MID": 2, "ADC": 3, "SUPPORT": 4}
             for i in range(len(annotated)):
                 for j in range(i + 1, len(annotated)):
                     p1, p2 = annotated[i], annotated[j]
                     a, la = p1["_champ"], p1["_lane"]
                     b, lb = p2["_champ"], p2["_lane"]
-                    if (a, la) > (b, lb):
+                    # Tri canonique : d'abord par ordre de lane, puis par champion
+                    if (LANE_ORDER[la], a) > (LANE_ORDER[lb], b):
                         a, la, b, lb = b, lb, a, la
                     key = (a, b, la, lb)
                     synergy_data[key]["total"] += 1
                     synergy_data[key]["wins"]  += int(p1.get("win", False))
-
         # ── Matchups par lane (blue vs red) ──
         blue_by_lane = {}
         red_by_lane  = {}
