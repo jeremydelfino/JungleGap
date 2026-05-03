@@ -1,0 +1,75 @@
+/* ─── PAGE ─── */
+.cd-sr { max-width: 1100px; margin: 0 auto; padding: 32px 20px 60px; color: #e8eaf0; }
+
+/* ─── VERDICT ─── */
+.cd-sr-verdict { text-align: center; padding: 32px 20px; background: #141414; border: 1px solid #ffffff10; border-radius: 16px; margin-bottom: 24px; opacity: 0; transform: translateY(8px); transition: all 0.5s ease-out; }
+.cd-sr-verdict.shown { opacity: 1; transform: translateY(0); }
+.cd-sr-emoji { font-size: 56px; margin-bottom: 12px; }
+.cd-sr-eyebrow { font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 800; letter-spacing: 4px; color: var(--vc); margin-bottom: 10px; }
+.cd-sr-title { font-family: 'Outfit', sans-serif; font-size: 42px; font-weight: 900; letter-spacing: -0.5px; margin: 0 0 14px; color: var(--vc); }
+.cd-sr-payout { display: inline-block; padding: 8px 18px; background: #1a1a1a; border: 1px solid var(--vc); border-radius: 8px; font-family: 'Outfit', sans-serif; font-size: 16px; font-weight: 800; color: var(--vc); }
+
+/* ─── SCORES ─── */
+.cd-sr-scores { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: stretch; margin-bottom: 24px; }
+.cd-sr-vs { font-family: 'Outfit', sans-serif; font-size: 18px; font-weight: 900; color: #4b5563; align-self: center; padding: 0 8px; letter-spacing: 2px; }
+
+/* ─── SCORE CARD ─── */
+.cd-sr-card { padding: 20px; background: #141414; border: 2px solid #ffffff10; border-radius: 14px; transition: all 0.3s; }
+.cd-sr-card-blue { border-left: 4px solid #4a8de8; }
+.cd-sr-card-red  { border-left: 4px solid #e84a4a; }
+.cd-sr-card.winner { border-color: #65BD62; box-shadow: 0 0 0 1px #65BD6240, 0 8px 32px #65BD6220; }
+.cd-sr-card-label { font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #9ca3af; text-transform: uppercase; margin-bottom: 4px; }
+.cd-sr-card-side { font-family: 'Outfit', sans-serif; font-size: 13px; font-weight: 700; color: #c0c4cc; margin-bottom: 12px; }
+.cd-sr-card-score { font-family: 'Outfit', sans-serif; font-size: 56px; font-weight: 900; line-height: 1; letter-spacing: -2px; margin-bottom: 16px; background: linear-gradient(135deg, #e8eaf0, #c89b3c); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.cd-sr-card-score span { font-size: 18px; color: #6b7280; -webkit-text-fill-color: #6b7280; font-weight: 600; margin-left: 4px; }
+.cd-sr-card.winner .cd-sr-card-score { background: linear-gradient(135deg, #65BD62, #c89b3c); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+
+/* ─── ROSTER ─── */
+.cd-sr-card-roster { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.cd-sr-roster-row { display: flex; align-items: center; gap: 8px; padding: 6px; background: #0d0d0d; border-radius: 6px; border: 1px solid #ffffff05; }
+.cd-sr-roster-icon { font-size: 14px; width: 20px; text-align: center; }
+.cd-sr-roster-row img { width: 28px; height: 28px; border-radius: 4px; object-fit: cover; }
+.cd-sr-roster-name { font-family: 'Outfit', sans-serif; font-size: 12px; font-weight: 700; color: #e8eaf0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-sr-roster-empty { color: #4b5563; font-size: 11px; }
+
+/* ─── MINI BREAKDOWN ─── */
+.cd-sr-card-mini { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding-top: 12px; border-top: 1px solid #ffffff08; }
+.cd-sr-card-mini > div { text-align: center; }
+.cd-sr-card-mini span { display: block; font-family: 'Inter', sans-serif; font-size: 9px; font-weight: 600; letter-spacing: 1px; color: #6b7280; text-transform: uppercase; margin-bottom: 2px; }
+.cd-sr-card-mini b { font-family: 'Outfit', sans-serif; font-size: 14px; font-weight: 800; color: #e8eaf0; }
+
+/* ─── DETAIL TABLE ─── */
+.cd-sr-detail { background: #141414; border: 1px solid #ffffff10; border-radius: 12px; padding: 18px; margin-bottom: 24px; }
+.cd-sr-detail-title { font-family: 'Outfit', sans-serif; font-size: 13px; font-weight: 800; letter-spacing: 1.5px; color: #c89b3c; text-transform: uppercase; margin-bottom: 12px; }
+.cd-sr-table { display: flex; flex-direction: column; }
+.cd-sr-table-head { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; padding: 8px 10px; border-bottom: 1px solid #ffffff15; }
+.cd-sr-table-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; padding: 10px; border-radius: 6px; transition: background 0.15s; }
+.cd-sr-table-row:hover { background: #ffffff04; }
+.cd-sr-table-cell { font-family: 'Outfit', sans-serif; font-size: 13px; font-weight: 700; color: #e8eaf0; text-align: center; }
+.cd-sr-table-cell.label { text-align: left; color: #c0c4cc; font-weight: 600; }
+.cd-sr-table-cell.user { color: #65BD62; }
+.cd-sr-table-cell.bot { color: #e2b147; }
+.cd-sr-table-cell.max { color: #6b7280; font-weight: 500; }
+.cd-sr-table-cell.bonus { color: #65BD62; }
+.cd-sr-table-cell.penalty { color: #ef4444; }
+.cd-sr-table-head .cd-sr-table-cell { font-family: 'Inter', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 1.5px; color: #6b7280; text-transform: uppercase; }
+
+/* ─── ACTIONS ─── */
+.cd-sr-actions { display: flex; gap: 12px; justify-content: center; }
+.cd-sr-btn { padding: 14px 28px; border: none; border-radius: 10px; font-family: 'Outfit', sans-serif; font-size: 14px; font-weight: 800; letter-spacing: 0.5px; cursor: pointer; transition: all 0.2s; }
+.cd-sr-btn.primary { background: linear-gradient(90deg, #65BD62, #4ea84b); color: #0a0a0a; }
+.cd-sr-btn.primary:hover { transform: translateY(-1px); box-shadow: 0 8px 24px #65BD6240; }
+.cd-sr-btn.secondary { background: #1a1a1a; color: #c0c4cc; border: 1px solid #ffffff15; }
+.cd-sr-btn.secondary:hover { background: #222; border-color: #ffffff25; }
+
+/* ─── RESPONSIVE ─── */
+@media (max-width: 768px) {
+  .cd-sr-title { font-size: 30px; }
+  .cd-sr-emoji { font-size: 44px; }
+  .cd-sr-scores { grid-template-columns: 1fr; }
+  .cd-sr-vs { padding: 4px 0; text-align: center; }
+  .cd-sr-card-score { font-size: 44px; }
+  .cd-sr-table-head, .cd-sr-table-row { grid-template-columns: 1.5fr 1fr 1fr 0.6fr; padding: 6px 8px; }
+  .cd-sr-table-cell { font-size: 11px; }
+  .cd-sr-actions { flex-direction: column; }
+}

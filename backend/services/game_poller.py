@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 RIOT_API_KEY = os.getenv("RIOT_API_KEY")
 
-CHAMP_VERSION = "14.24.1"
+CHAMP_VERSION = "16.9.1"
 
 # ──────────────────────────────────────────────────────────────
 # CHAMPION MAPPING

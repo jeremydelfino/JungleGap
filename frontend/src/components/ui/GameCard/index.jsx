@@ -1,7 +1,7 @@
 import './GameCard.css'
 import api from '../../../api/client'
 
-const CHAMP_VERSION = '14.24.1'
+const CHAMP_VERSION = '16.9.1'
 
 function getChampIcon(championName) {
   if (!championName || championName === '???' || championName === '??') return null

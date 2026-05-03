@@ -31,6 +31,7 @@ from routers import esports
 from routers import admin_jobs
 from routers.settings import router as settings_router
 from routers import odds_debug
+from routers import coachdiff
 # Services
 from services.esports_sync import sync_all_teams
 from services.champion_winrate_collector import refresh_champion_winrates
@@ -161,6 +162,8 @@ app.include_router(favorites.router)
 app.include_router(leaderboard.router)
 app.include_router(esports.router)
 app.include_router(admin_jobs.router)
+app.include_router(coachdiff.router)
+
 
 
 @app.get("/")

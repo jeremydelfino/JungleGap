@@ -5,8 +5,9 @@ const LINKS = {
   platform: [
     { label: 'Live',         path: '/',           icon: '⚡' },
     { label: 'Ligues Pros',  path: '/betonpros',  icon: '🎖️' },
-    { label: 'Mes Paris',    path: '/bets',        icon: '🎯' },
-    { label: 'Classement',   path: '/leaderboard', icon: '🏆' },
+    { label: 'Jeux',         path: '/games',      icon: '🎮' },
+    { label: 'Mes Paris',    path: '/bets',       icon: '🎯' },
+    { label: 'Classement',   path: '/leaderboard',icon: '🏆' },
   ],
   account: [
     { label: 'Mon Profil',   path: '/profile',    icon: '👤' },

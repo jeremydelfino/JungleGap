@@ -174,9 +174,10 @@ export default function Navbar() {
         <div className="navbar-links">
           {[
             { path: '/',           icon: '⚡', label: 'Live' },
-            { path: '/betonpros', icon: '🎖️', label: 'Ligues Pros' },
-            { path: '/bets',      icon: '🎯', label: 'Mes Paris' },
-            { path: '/leaderboard', icon: '🏆', label: 'Classement' },
+            { path: '/betonpros',  icon: '🎖️', label: 'Ligues Pros' },
+            { path: '/games',      icon: '🎮', label: 'Jeux' },
+            { path: '/bets',       icon: '🎯', label: 'Mes Paris' },
+            { path: '/leaderboard',icon: '🏆', label: 'Classement' },
           ].map(({ path, icon, label }) => (
             <button
               key={path}
@@ -293,6 +294,12 @@ export default function Navbar() {
           <button className={`bottom-nav-item ${isActive('/bets') ? 'active' : ''}`} onClick={() => navigate('/bets')}>
             <div className="bnav-icon-wrap">🎯{isActive('/bets') && <span className="bnav-active-dot" />}</div>
             <span className="bnav-label">Paris</span>
+          </button>
+
+          {/* Jeux */}
+          <button className={`bottom-nav-item ${isActive('/games') ? 'active' : ''}`} onClick={() => navigate('/games')}>
+            <div className="bnav-icon-wrap">🎮{isActive('/games') && <span className="bnav-active-dot" />}</div>
+            <span className="bnav-label">Jeux</span>
           </button>
 
           {/* Notifs */}

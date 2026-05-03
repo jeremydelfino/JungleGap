@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import useAuthStore from '../../store/auth'
 import api from '../../api/client'
 
-const DDV      = '14.24.1'
+const DDV      = '16.9.1'
 const PER_PAGE = 8
 
 const STATUS_CONFIG = {

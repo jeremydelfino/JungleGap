@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import useAuthStore from '../../store/auth'
 import api from '../../api/client'
 
-const DDV = '14.24.1'
+const DDV = '16.9.1'
 const ROLE_ORDER  = ['TOP','JUNGLE','MID','ADC','SUPPORT','FILL']
 const ROLE_ICONS  = { TOP:'🛡️', JUNGLE:'🌿', MID:'⚡', ADC:'🏹', SUPPORT:'💙', FILL:'❓' }
 const ROLE_LABELS = { TOP:'TOP', JUNGLE:'JUNGLE', MIDDLE:'MID', MID:'MID', BOTTOM:'ADC', ADC:'ADC', UTILITY:'SUPPORT', SUPPORT:'SUPPORT' }

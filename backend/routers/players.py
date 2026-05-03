@@ -35,7 +35,7 @@ async def get_ddragon_version() -> str:
             resp = await client.get("https://ddragon.leagueoflegends.com/api/versions.json")
             _ddragon_version = resp.json()[0]
     except Exception:
-        _ddragon_version = "14.24.1"  # fallback
+        _ddragon_version = "16.9.1"  # fallback
     return _ddragon_version
 
 async def ddragon_url(path: str) -> str:

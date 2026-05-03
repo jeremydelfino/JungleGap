@@ -1,0 +1,29 @@
+/* ─── DEBUG (livraisons restantes) ─── */
+.cdg-loading,
+.cdg-error,
+.cdg-debug { max-width: 900px; margin: 0 auto; padding: 40px 24px 80px; color: #e8eaf0; font-family: 'Inter', sans-serif; }
+.cdg-loading { text-align: center; color: #9ca3af; padding-top: 120px; }
+.cdg-error   { text-align: center; color: #ef4444; }
+.cdg-error button { margin-top: 16px; padding: 10px 20px; background: #65BD62; border: none; border-radius: 8px; color: #000; cursor: pointer; }
+.cdg-debug h2 { font-family: 'Outfit', sans-serif; font-size: 28px; margin-bottom: 16px; }
+.cdg-debug p  { margin: 4px 0; }
+.cdg-debug button { padding: 10px 20px; background: #65BD62; border: none; border-radius: 8px; color: #000; cursor: pointer; font-weight: 700; }
+
+/* ─── PAGE ─── */
+.cdg-page { max-width: 1300px; margin: 0 auto; padding: 14px 16px 60px; color: #e8eaf0; }
+
+/* ─── BANS ─── */
+.cdg-bans { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+
+/* ─── BOARD ─── */
+.cdg-board { display: grid; grid-template-columns: 200px 1fr 200px; gap: 14px; align-items: stretch; }
+
+/* ─── RESPONSIVE ─── */
+@media (max-width: 1024px) {
+  .cdg-board { grid-template-columns: 160px 1fr 160px; gap: 10px; }
+}
+@media (max-width: 768px) {
+  .cdg-page { padding: 10px 8px 60px; }
+  .cdg-bans { grid-template-columns: 1fr; gap: 8px; }
+  .cdg-board { grid-template-columns: 1fr; gap: 10px; }
+}

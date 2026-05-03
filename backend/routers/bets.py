@@ -14,7 +14,7 @@ from services.live_odds_engine import FIXED_ODDS
 
 router = APIRouter(prefix="/bets", tags=["bets"])
 
-DDV = "14.24.1"
+DDV = "16.9.1"
 
 VALID_BET_TYPES = {
     "who_wins", "first_blood", "first_tower", "first_dragon", "first_baron",
