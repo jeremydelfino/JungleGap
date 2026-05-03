@@ -390,24 +390,52 @@ def notify_favorites_for_game(db: Session, pro: ProPlayer, new_game: LiveGame):
 # CALCUL CÔTES EN BACKGROUND
 # ──────────────────────────────────────────────────────────────
 
+# backend/services/game_poller.py — remplacer la fonction _compute_and_save_odds existante
+
+# ──────────────────────────────────────────────────────────────
+# CALCUL CÔTES EN BACKGROUND
+# ──────────────────────────────────────────────────────────────
+
+# Lock par game_id : empêche 2 calculs concurrents sur la même game
+_odds_locks: dict[int, asyncio.Lock] = {}
+_odds_in_progress: set[int] = set()
+
 async def _compute_and_save_odds(game_id: int, blue_team: list, red_team: list, region: str):
+    if game_id in _odds_in_progress:
+        logger.info(f"   ⏭️  Calcul cotes game {game_id} déjà en cours — skip")
+        return
+
+    db_check = SessionLocal()
+    try:
+        existing = db_check.query(LiveGame).filter(LiveGame.id == game_id).first()
+        if existing and existing.odds_data:
+            logger.info(f"   ⏭️  Cotes déjà calculées game {game_id} — skip")
+            return
+    finally:
+        db_check.close()
+
+    _odds_in_progress.add(game_id)
     db = SessionLocal()
     try:
         odds_data = await asyncio.wait_for(
             compute_live_odds(blue_team, red_team, region=region),
-            timeout=30.0,
+            timeout=90.0,  # ← 30 → 90 (réaliste avec rate-limiter)
         )
         game = db.query(LiveGame).filter(LiveGame.id == game_id).first()
         if game:
             game.odds_data = odds_data
             db.commit()
-            logger.info(f"   📊 Côtes sauvegardées game {game_id} → Blue ×{odds_data['who_wins']['blue']} / Red ×{odds_data['who_wins']['red']}")
+            logger.info(
+                f"   📊 Côtes sauvegardées game {game_id} → "
+                f"Blue ×{odds_data['who_wins']['blue']} / Red ×{odds_data['who_wins']['red']}"
+            )
     except asyncio.TimeoutError:
-        logger.warning(f"   ⚠️  Odds engine timeout pour game {game_id}")
+        logger.warning(f"   ⚠️  Odds engine timeout pour game {game_id} (90s)")
     except Exception as e:
-        logger.error(f"   ⚠️  Odds engine error game {game_id}: {e}")
+        logger.error(f"   ⚠️  Odds engine error game {game_id}: {e}", exc_info=True)
     finally:
         db.close()
+        _odds_in_progress.discard(game_id)
 
 # ──────────────────────────────────────────────────────────────
 # RÉSOLUTION DES PARIS

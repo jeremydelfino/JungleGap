@@ -13,13 +13,14 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # ─── Cache en mémoire ────────────────────────────────────────
+
 _STATS_CACHE: dict = {}
-CACHE_TTL_MINUTES = 30
-N_GAMES = 10
+CACHE_TTL_MINUTES = 60         # ← 30 → 60
+NEG_CACHE_TTL_MINUTES = 10     # ← NOUVEAU : cache négatif court
+N_GAMES = 5                    # ← 10 → 5
 
-# Queues à essayer dans l'ordre : ranked solo → ranked flex → toutes les queues classées
-QUEUE_FALLBACKS = [420, 440, None]   # None = pas de filtre queue
-
+# Queues : ranked solo en priorité, fallback "toutes" si pas trouvé. Drop flex.
+QUEUE_FALLBACKS = [420, None]  # ← [420, 440, None] → [420, None]
 
 def _cache_get(puuid: str) -> dict | None:
     entry = _STATS_CACHE.get(puuid)
@@ -31,10 +32,10 @@ def _cache_get(puuid: str) -> dict | None:
     return entry["data"]
 
 
-def _cache_set(puuid: str, data: dict):
+def _cache_set(puuid: str, data: dict, ttl_minutes: int = CACHE_TTL_MINUTES):
     _STATS_CACHE[puuid] = {
         "data":       data,
-        "expires_at": datetime.utcnow() + timedelta(minutes=CACHE_TTL_MINUTES),
+        "expires_at": datetime.utcnow() + timedelta(minutes=ttl_minutes),
     }
 
 
@@ -126,10 +127,11 @@ async def get_player_stats(puuid: str, region: str, current_champ: str | None = 
 
     routing = ROUTING.get(region.upper(), "europe")
     match_ids, err = await _fetch_match_ids(puuid, region, N_GAMES)
-
+    
     if not match_ids:
-        return _default_stats(error=err or "no_match_ids")
-
+        default = _default_stats(error=err or "no_match_ids")
+        _cache_set(puuid, [], ttl_minutes=NEG_CACHE_TTL_MINUTES)  # ← NOUVEAU
+        return default
     tasks   = [_fetch_match(mid, routing) for mid in match_ids]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
