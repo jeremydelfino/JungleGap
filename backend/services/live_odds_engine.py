@@ -252,20 +252,15 @@ def _meta_strength(team: list[dict], champ_stats: dict | None) -> float:
 # ──────────────────────────────────────────────────────────────
 
 async def _team_score(team: list[dict], region: str) -> tuple[float, dict]:
-    # Stats joueurs (Riot API en parallèle)
-    tasks = []
+# Stats joueurs (Riot API en VRAI parallèle)
+    coros = []
     for p in team:
         if p.get("puuid"):
-            tasks.append(get_player_stats(p["puuid"], region, p.get("championName")))
+            coros.append(get_player_stats(p["puuid"], region, p.get("championName")))
         else:
-            tasks.append(_default_stats_coro())
+            coros.append(_default_stats_coro())
 
-    stats_list = []
-    for t in tasks:
-        try:
-            stats_list.append(await t)
-        except Exception as e:
-            stats_list.append(e)
+    stats_list = await asyncio.gather(*coros, return_exceptions=True)
     valid_stats, players_detail = [], []
     for p, stats in zip(team, stats_list):
         if isinstance(stats, Exception) or stats is None:
