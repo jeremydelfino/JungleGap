@@ -812,64 +812,75 @@ async def poll_pro_games():
                 continue
 
 # ── Détection games terminées ─────────────────────────
-        # IMPORTANT : on ne marque ENDED que les games contenant un pro.
-        # Les games non-pro (créées via player-search) sont vérifiées séparément
-        # car le poll pro ne les voit pas dans processed_game_ids.
+        # On distingue les games pro (vues via Spectator dans ce poll)
+        # des games non-pro (créées via player-search) qu'on vérifie via Spectator au cas-par-cas.
         active_games     = db.query(LiveGame).filter(LiveGame.status == "live").all()
         games_to_resolve = []
+        non_pro_to_check = []
+
+        all_pro_puuids = {p.riot_puuid for p in pros if p.riot_puuid}
 
         for game in active_games:
             if game.riot_game_id in processed_game_ids:
-                continue
+                continue  # déjà vu dans le poll pro
 
-            # Détecter si la game contient un pro
             game_puuids = [
                 p.get("puuid")
                 for p in (game.blue_team or []) + (game.red_team or [])
                 if p.get("puuid")
             ]
-            has_pro = db.query(ProPlayer).filter(
-                ProPlayer.riot_puuid.in_(game_puuids)
-            ).first() is not None
+            has_pro = any(pu in all_pro_puuids for pu in game_puuids)
 
-            if not has_pro:
-                # Game non-pro : on ne touche pas, elle sera gérée par check_non_pro_games
-                continue
+            if has_pro:
+                # Game pro non vue → vraiment terminée
+                game.status = "ended"
+                logger.info(f"   🏁 Game pro {game.riot_game_id} marquée ENDED")
 
-            game.status = "ended"
-            logger.info(f"   🏁 Game {game.riot_game_id} marquée ENDED (pro game)")
-            has_pending = db.query(Bet).filter(
-                Bet.live_game_id == game.id,
-                Bet.status       == "pending",
-            ).first()
-
-            if has_pending:
-                all_puuids = [
-                    p.get("puuid")
-                    for p in (game.blue_team or []) + (game.red_team or [])
-                    if p.get("puuid")
-                ]
-                pro_match = db.query(ProPlayer).filter(
-                    ProPlayer.riot_puuid.in_(all_puuids)
+                has_pending = db.query(Bet).filter(
+                    Bet.live_game_id == game.id,
+                    Bet.status       == "pending",
                 ).first()
-                if pro_match:
-                    region = pro_match.region
-                elif game.region:
-                    region = game.region
-                else:
-                    # Fallback : chercher via SearchedPlayer lié à la game
-                    from models.player import SearchedPlayer
-                    searched = db.query(SearchedPlayer).filter(
-                        SearchedPlayer.id == game.searched_player_id
+
+                if has_pending:
+                    pro_match = db.query(ProPlayer).filter(
+                        ProPlayer.riot_puuid.in_(game_puuids)
                     ).first()
-                    if searched:
-                        region = searched.region
-                    else:
-                        region = "KR" if str(game.riot_game_id).startswith("8") else "EUW"
-                games_to_resolve.append((game.id, game.riot_game_id, region))
+                    region = pro_match.region if pro_match else (game.region or "EUW")
+                    games_to_resolve.append((game.id, game.riot_game_id, region))
+            else:
+                # Game non-pro : on doit vérifier via Spectator-V5 si elle est encore live
+                if game_puuids:
+                    non_pro_to_check.append((game, game_puuids[0]))
 
         db.commit()
 
+        # ── Vérif des games non-pro via Spectator-V5 ──────────
+        for game, ref_puuid in non_pro_to_check:
+            try:
+                region = game.region or "EUW"
+                live_check = await get_live_game_by_puuid(ref_puuid, region)
+
+                if live_check and str(live_check.get("gameId")) == game.riot_game_id:
+                    # Toujours en cours → MAJ duration
+                    game.duration_seconds = live_check.get("gameLength", game.duration_seconds)
+                    continue
+
+                # Plus en cours → ENDED
+                game.status = "ended"
+                logger.info(f"   🏁 Game non-pro {game.riot_game_id} marquée ENDED")
+
+                has_pending = db.query(Bet).filter(
+                    Bet.live_game_id == game.id,
+                    Bet.status       == "pending",
+                ).first()
+                if has_pending:
+                    games_to_resolve.append((game.id, game.riot_game_id, region))
+
+                await asyncio.sleep(1.5)  # respect du rate-limiter Riot
+            except Exception as e:
+                logger.warning(f"   ⚠️ check non-pro {game.riot_game_id}: {e}")
+
+        db.commit()
         for gid, rgid, reg in games_to_resolve:
             logger.info(f"   🎯 Résolution background lancée pour game {gid}")
             asyncio.create_task(resolve_bets_for_game(gid, rgid, reg))
