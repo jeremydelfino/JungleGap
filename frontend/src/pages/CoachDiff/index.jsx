@@ -8,10 +8,10 @@ const ENTRY_COST = 5
 const WIN_PAYOUT = 10
 
 const RULES = [
-  { icon: '⚔️', title: 'Format tournoi', desc: '6 bans, 6 picks, puis 4 bans, 4 picks. Comme la LCK / LEC.' },
+  { icon: '⚔️', title: 'Format tournoi', desc: '6 bans, 6 picks, puis 4 bans, 4 picks. Comme les pros.' },
   { icon: '🤖', title: '1v1 contre un bot', desc: 'Le bot drafte aléatoirement pondéré par la tier list pro.' },
-  { icon: '🎯', title: 'Assigne les rôles', desc: 'À la fin, place tes champions sur top / jungle / mid / adc / supp.' },
-  { icon: '💯', title: 'Score sur 100', desc: 'WR SoloQ, matchups, synergies, présence Pro. Le meilleur draft gagne.' },
+  { icon: '🎯', title: 'Assigne les rôles', desc: 'À la fin, place tes champions sur leur lane (Top / Jungle / Mid / Adc / Support).' },
+  { icon: '💯', title: 'Score sur 100', desc: 'WR SoloQ, matchups, synergies et présence Pro sont évaluées. La meilleure draft gagne.' },
 ]
 
 export default function CoachDiff() {
@@ -71,7 +71,7 @@ export default function CoachDiff() {
       <section className="cd-hero">
         <div className="cd-hero-eyebrow">JEU · COACHDIFF</div>
         <h1 className="cd-hero-title">Drafte mieux que le bot</h1>
-        <p className="cd-hero-sub">Format tournoi LCK. Score sur 100. Le meilleur draft gagne.</p>
+        <p className="cd-hero-sub">"Draft diff gngngn..." On va voir si tes avis désastreux marcheraient vraiment</p>
       </section>
 
       {/* ─── REPRENDRE ─── */}

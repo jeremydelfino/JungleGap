@@ -821,7 +821,19 @@ async def poll_pro_games():
         for gid, rgid, reg in games_to_resolve:
             logger.info(f"   🎯 Résolution background lancée pour game {gid}")
             asyncio.create_task(resolve_bets_for_game(gid, rgid, reg))
+        games_no_odds = db.query(LiveGame).filter(
+            LiveGame.status    == "live",
+            LiveGame.odds_data == None,
+        ).limit(20).all()
 
+        for g in games_no_odds:
+            if g.id in _odds_in_progress:
+                continue
+            region = g.region or "EUW"
+            logger.info(f"   🔁 Rattrapage cotes manquantes game {g.id} ({g.riot_game_id})")
+            asyncio.create_task(
+                _compute_and_save_odds(g.id, g.blue_team or [], g.red_team or [], region)
+            )
         logger.info(f"✅ Poll terminé — {len(puuids_in_game)} pros en game")
 
     except Exception as e:

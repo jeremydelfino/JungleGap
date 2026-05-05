@@ -7,7 +7,7 @@ const GAMES = [
     path: '/games/coachdiff',
     title: 'CoachDiff',
     tagline: 'Drafte mieux que le bot',
-    desc: 'Affronte un bot dans une draft style tournoi. Le meilleur draft gagne. Mise 5 coins, gagne 10.',
+    desc: 'Affronte un bot dans une draft style tournoi. Le meilleur draft gagne. On va pouvoir enfin voir si tes avis désastreux marcheraient vraiment.',
     icon: '🧠',
     tags: ['1v1 vs Bot', 'Draft', '5 → 10 🪙'],
     available: true,
@@ -34,7 +34,7 @@ export default function Games() {
       <section className="games-hero">
         <div className="games-hero-eyebrow">JUNGLEGAP GAMES</div>
         <h1 className="games-hero-title">Choisis ton mode de jeu</h1>
-        <p className="games-hero-sub">Mini-jeux League of Legends. Mise tes coins, défie le bot, gagne plus.</p>
+        <p className="games-hero-sub">Mini-jeux League of Legends. Mise tes coins et défie le bot ou des joueurs 😉 (soon)</p>
       </section>
 
       {/* ─── GRID ─── */}
