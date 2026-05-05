@@ -419,7 +419,7 @@ async def _compute_and_save_odds(game_id: int, blue_team: list, red_team: list, 
     try:
         odds_data = await asyncio.wait_for(
             compute_live_odds(blue_team, red_team, region=region),
-            timeout=90.0,  # ← 30 → 90 (réaliste avec rate-limiter)
+            timeout=240.0,  # 4 min — fetch stats 10 randoms via rate-limiter
         )
         game = db.query(LiveGame).filter(LiveGame.id == game_id).first()
         if game:
@@ -430,13 +430,49 @@ async def _compute_and_save_odds(game_id: int, blue_team: list, red_team: list, 
                 f"Blue ×{odds_data['who_wins']['blue']} / Red ×{odds_data['who_wins']['red']}"
             )
     except asyncio.TimeoutError:
-        logger.warning(f"   ⚠️  Odds engine timeout pour game {game_id} (90s)")
+        logger.warning(f"   ⚠️  Odds engine timeout game {game_id} (240s) — fallback")
+        _save_fallback_odds(db, game_id)
     except Exception as e:
         logger.error(f"   ⚠️  Odds engine error game {game_id}: {e}", exc_info=True)
+        _save_fallback_odds(db, game_id)
     finally:
         db.close()
         _odds_in_progress.discard(game_id)
 
+
+def _save_fallback_odds(db: Session, game_id: int):
+    """
+    Sauve des cotes par défaut quand compute_live_odds n'aboutit pas.
+    Permet de débloquer les paris immédiatement. Le flag _fallback=True
+    permet de recalculer plus tard si voulu.
+    """
+    try:
+        game = db.query(LiveGame).filter(LiveGame.id == game_id).first()
+        if not game or game.odds_data:
+            return
+        fallback = {
+            "who_wins":     {"blue": 1.95, "red": 1.95},
+            "first_blood":  FIXED_ODDS["first_blood"],
+            "first_tower":  {"blue": FIXED_ODDS["first_tower"],  "red": FIXED_ODDS["first_tower"]},
+            "first_dragon": {"blue": FIXED_ODDS["first_dragon"], "red": FIXED_ODDS["first_dragon"]},
+            "first_baron":  {"blue": FIXED_ODDS["first_baron"],  "red": FIXED_ODDS["first_baron"]},
+            "jungle_gap":   {"blue": FIXED_ODDS["jungle_gap"],   "red": FIXED_ODDS["jungle_gap"]},
+            "game_duration_under25": FIXED_ODDS["game_duration_under25"],
+            "game_duration_25_35":   FIXED_ODDS["game_duration_25_35"],
+            "game_duration_over35":  FIXED_ODDS["game_duration_over35"],
+            "player_positive_kda":   FIXED_ODDS["player_positive_kda"],
+            "champion_kda_over25":   FIXED_ODDS["champion_kda_over25"],
+            "champion_kda_over5":    FIXED_ODDS["champion_kda_over5"],
+            "champion_kda_over10":   FIXED_ODDS["champion_kda_over10"],
+            "top_damage":            FIXED_ODDS["top_damage"],
+            "_fallback": True,
+        }
+        game.odds_data = fallback
+        db.commit()
+        logger.info(f"   🛟 Cotes fallback sauvegardées game {game_id} (paris débloqués)")
+    except Exception as e:
+        logger.error(f"   ❌ Erreur _save_fallback_odds game {game_id}: {e}")
+        db.rollback()
 # ──────────────────────────────────────────────────────────────
 # RÉSOLUTION DES PARIS
 # ──────────────────────────────────────────────────────────────
@@ -821,9 +857,13 @@ async def poll_pro_games():
         for gid, rgid, reg in games_to_resolve:
             logger.info(f"   🎯 Résolution background lancée pour game {gid}")
             asyncio.create_task(resolve_bets_for_game(gid, rgid, reg))
+        from sqlalchemy import or_
         games_no_odds = db.query(LiveGame).filter(
-            LiveGame.status    == "live",
-            LiveGame.odds_data == None,
+            LiveGame.status == "live",
+            or_(
+                LiveGame.odds_data == None,
+                LiveGame.odds_data["_fallback"].astext == "true",
+            ),
         ).limit(20).all()
 
         for g in games_no_odds:
