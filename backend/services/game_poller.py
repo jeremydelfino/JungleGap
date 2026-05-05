@@ -811,7 +811,10 @@ async def poll_pro_games():
                 logger.error(f"   ❌ Erreur pour {pro.name}: {e}")
                 continue
 
-        # ── Détection games terminées ─────────────────────────
+# ── Détection games terminées ─────────────────────────
+        # IMPORTANT : on ne marque ENDED que les games contenant un pro.
+        # Les games non-pro (créées via player-search) sont vérifiées séparément
+        # car le poll pro ne les voit pas dans processed_game_ids.
         active_games     = db.query(LiveGame).filter(LiveGame.status == "live").all()
         games_to_resolve = []
 
@@ -819,9 +822,22 @@ async def poll_pro_games():
             if game.riot_game_id in processed_game_ids:
                 continue
 
-            game.status = "ended"
-            logger.info(f"   🏁 Game {game.riot_game_id} marquée ENDED")
+            # Détecter si la game contient un pro
+            game_puuids = [
+                p.get("puuid")
+                for p in (game.blue_team or []) + (game.red_team or [])
+                if p.get("puuid")
+            ]
+            has_pro = db.query(ProPlayer).filter(
+                ProPlayer.riot_puuid.in_(game_puuids)
+            ).first() is not None
 
+            if not has_pro:
+                # Game non-pro : on ne touche pas, elle sera gérée par check_non_pro_games
+                continue
+
+            game.status = "ended"
+            logger.info(f"   🏁 Game {game.riot_game_id} marquée ENDED (pro game)")
             has_pending = db.query(Bet).filter(
                 Bet.live_game_id == game.id,
                 Bet.status       == "pending",
@@ -878,6 +894,77 @@ async def poll_pro_games():
 
     except Exception as e:
         logger.error(f"❌ Erreur poll global: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+async def check_non_pro_games():
+    """
+    Vérifie l'état des games non-pro (créées via player-search).
+    Utilise Spectator-V5 sur un puuid de la game pour savoir si elle est encore live.
+    Marque ENDED les games qui ne sont plus actives.
+    """
+    db: Session = SessionLocal()
+    try:
+        # Games live sans aucun pro dedans
+        non_pro_games = db.query(LiveGame).filter(
+            LiveGame.status == "live",
+        ).all()
+
+        pro_puuids = {p.riot_puuid for p in db.query(ProPlayer).all() if p.riot_puuid}
+
+        to_check = []
+        for g in non_pro_games:
+            game_puuids = {
+                p.get("puuid")
+                for p in (g.blue_team or []) + (g.red_team or [])
+                if p.get("puuid")
+            }
+            if not (game_puuids & pro_puuids):
+                to_check.append(g)
+
+        logger.info(f"🔎 Check {len(to_check)} games non-pro")
+
+        games_to_resolve = []
+        for g in to_check:
+            game_puuids = [
+                p.get("puuid")
+                for p in (g.blue_team or []) + (g.red_team or [])
+                if p.get("puuid")
+            ]
+            if not game_puuids:
+                continue
+
+            ref_puuid = game_puuids[0]
+            region    = g.region or "EUW"
+
+            still_live = await get_live_game_by_puuid(ref_puuid, region)
+            if still_live and str(still_live.get("gameId")) == g.riot_game_id:
+                # Toujours en cours → mettre à jour duration
+                g.duration_seconds = still_live.get("gameLength", g.duration_seconds)
+                continue
+
+            # Game terminée
+            g.status = "ended"
+            logger.info(f"   🏁 Game non-pro {g.riot_game_id} marquée ENDED")
+
+            has_pending = db.query(Bet).filter(
+                Bet.live_game_id == g.id,
+                Bet.status       == "pending",
+            ).first()
+            if has_pending:
+                games_to_resolve.append((g.id, g.riot_game_id, region))
+
+            await asyncio.sleep(1.5)  # respecte le rate-limiter
+
+        db.commit()
+
+        for gid, rgid, reg in games_to_resolve:
+            logger.info(f"   🎯 Résolution background non-pro game {gid}")
+            asyncio.create_task(resolve_bets_for_game(gid, rgid, reg))
+
+    except Exception as e:
+        logger.error(f"❌ Erreur check_non_pro_games: {e}", exc_info=True)
         db.rollback()
     finally:
         db.close()
