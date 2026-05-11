@@ -9,13 +9,15 @@ from models.esports_team_stats import EsportsTeamStats
 from models.transaction import Transaction
 from deps import get_current_user
 from services import lolesports
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from services.odds_engine import compute_match_odds as _compute_match_odds
 from models.esports_team_rating import EsportsTeamRating
 from deps import get_current_user, get_admin_user
 import math
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/esports", tags=["esports"])
 
 # ─── Config ligues ────────────────────────────────────────────
@@ -1108,9 +1110,6 @@ async def resolve_completed_matches(db: Session):
     Parcourt tous les completed events de toutes les ligues et résout les paris pending.
     Robuste aux cas dégénérés : forfait (gameWins=0-0 + outcome="win"), match annulé, etc.
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
     total_resolved = 0
     total_skipped  = 0
     total_errors   = 0
@@ -1183,37 +1182,71 @@ async def resolve_completed_matches(db: Session):
                 )
                 total_skipped += 1
                 continue
+            logger.info(f"[resolve] match {match_id}: API winner={winner}, score={score} (API t1={teams[0].get('code')}, t2={teams[1].get('code')})")
 
-            logger.info(f"[resolve] match {match_id}: winner={winner}, score={score}")
+            # ── Codes des équipes côté API + équipe gagnante (par CODE) ──
+            api_t1_code = (teams[0].get("code") or "").upper().strip()
+            api_t2_code = (teams[1].get("code") or "").upper().strip()
+            winning_code = api_t1_code if winner == "team1" else api_t2_code
+            api_winner_wins = t1_wins if winner == "team1" else t2_wins
+            api_loser_wins  = t2_wins if winner == "team1" else t1_wins
 
-            # Update tous les paris pending de ce match avec le résultat
-            db.query(EsportsBet).filter(
-                EsportsBet.match_id == match_id,
-                EsportsBet.status   == "pending",
-            ).update({
-                "actual_winner": winner,
-                "actual_score":  score,
-            })
-            db.commit()
-
-            match_extras = {}
+            # ── Map team_id → code (pour game_winners par code) ──
+            t1_id = teams[0].get("id", "")
+            t2_id = teams[1].get("id", "")
+            game_winner_codes = []
             try:
                 games = await lolesports.get_match_games(match_id)
-                # Map team_id → "team1"/"team2" pour normaliser
-                t1_id = teams[0].get("id", "")
-                t2_id = teams[1].get("id", "")
-                game_winners = []
                 for g in games:
                     if g["state"] != "completed":
                         continue
                     if g["winner_team_id"] == t1_id:
-                        game_winners.append("team1")
+                        game_winner_codes.append(api_t1_code)
                     elif g["winner_team_id"] == t2_id:
-                        game_winners.append("team2")
-                if game_winners:
-                    match_extras["game_winners"] = game_winners
+                        game_winner_codes.append(api_t2_code)
             except Exception as e:
                 logger.warning(f"[resolve] {match_id}: échec récupération games — {e}")
+
+            # ── Update CHAQUE pari avec winner/score du POV de SES team_codes stockés ──
+            pending_bets = db.query(EsportsBet).filter(
+                EsportsBet.match_id == match_id,
+                EsportsBet.status   == "pending",
+            ).all()
+
+            for b in pending_bets:
+                bet_t1 = (b.team1_code or "").upper().strip()
+                bet_t2 = (b.team2_code or "").upper().strip()
+
+                if winning_code == bet_t1:
+                    b.actual_winner = "team1"
+                    b.actual_score  = f"{api_winner_wins}-{api_loser_wins}"
+                elif winning_code == bet_t2:
+                    b.actual_winner = "team2"
+                    b.actual_score  = f"{api_winner_wins}-{api_loser_wins}"
+                else:
+                    logger.error(
+                        f"[resolve] bet {b.id}: winning_code={winning_code} ne match ni "
+                        f"bet.team1={bet_t1} ni bet.team2={bet_t2} — skip"
+                    )
+                    continue
+
+            db.commit()
+
+            # ── game_winners par CODE → mappé au POV du pari (utilisé par resolve_match) ──
+            match_extras = {}
+            if game_winner_codes and pending_bets:
+                # On prend le mapping du premier pari (tous ont les mêmes codes pour ce match_id)
+                ref_bet = pending_bets[0]
+                ref_t1 = (ref_bet.team1_code or "").upper().strip()
+                ref_t2 = (ref_bet.team2_code or "").upper().strip()
+                gw = []
+                for code in game_winner_codes:
+                    if code == ref_t1:
+                        gw.append("team1")
+                    elif code == ref_t2:
+                        gw.append("team2")
+                if gw:
+                    match_extras["game_winners"] = gw
 
             try:
                 resolve_match(match_id, db, match_extras=match_extras)
