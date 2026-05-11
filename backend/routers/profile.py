@@ -201,8 +201,8 @@ def get_public_profile(
 
 class SetTeamSchema(BaseModel):
     name:  str
-    logo:  str
-    color: str
+    logo:  str | None = None
+    color: str | None = None
 
 @router.post("/set-team")
 def set_favorite_team(
@@ -210,9 +210,9 @@ def set_favorite_team(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    current_user.favorite_team_name  = body.name
-    current_user.favorite_team_logo  = body.logo
-    current_user.favorite_team_color = body.color
+    current_user.favorite_team_name  = body.name or None
+    current_user.favorite_team_logo  = body.logo or None
+    current_user.favorite_team_color = body.color or None
     db.commit()
     return {"success": True, "favorite_team": {"name": body.name, "logo": body.logo, "color": body.color}}
 

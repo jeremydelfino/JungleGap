@@ -201,10 +201,11 @@ export default function Profile() {
   }, [])
 
   const handlePickTeam = async (team) => {
+    const payload = { name: team.name, logo: team.logo_url || '', color: team.accent_color || '' }
     try {
-      await api.post('/profile/set-team', { name: team.name, logo: team.logo, color: team.color })
-      setProfile(p => ({ ...p, favorite_team: { name: team.name, logo: team.logo, color: team.color } }))
-    } catch (err) { console.error(err) }
+      await api.post('/profile/set-team', payload)
+      setProfile(p => ({ ...p, favorite_team: { name: payload.name, logo: payload.logo, color: payload.color } }))
+    } catch (err) { console.error('set-team error:', err.response?.data || err) }
     setShowTeamPicker(false)
   }
 
@@ -663,10 +664,10 @@ export default function Profile() {
                     <div
                       key={team.name}
                       className={`profile-picker-team ${selected ? 'selected' : ''}`}
-                      style={{ '--tc': team.color || '#65BD62' }}
+                      style={{ '--tc': team.accent_color || '#65BD62' }}
                       onClick={() => handlePickTeam(team)}
                     >
-                      {team.logo && <img className="profile-picker-logo" src={team.logo} alt={team.name} referrerPolicy="no-referrer" />}
+                      {team.logo_url && <img className="profile-picker-logo" src={team.logo_url} alt={team.name} referrerPolicy="no-referrer" />}
                       <div className="profile-picker-team-name">{team.name}</div>
                       {selected && <div className="profile-picker-check">✓</div>}
                     </div>
