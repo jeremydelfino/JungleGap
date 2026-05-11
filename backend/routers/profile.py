@@ -171,6 +171,7 @@ async def get_my_profile(
         } if current_user.favorite_team_name else None,
         "social": {
             "discord":   {
+                "id":          current_user.discord_id,
                 "username":    current_user.discord_username,
                 "verified_at": current_user.discord_verified_at,
             } if current_user.discord_id else None,
@@ -208,8 +209,8 @@ def get_public_profile(
             "color": user.favorite_team_color,
         } if user.favorite_team_name else None,
         "social": {
-            "discord":   {"username": user.discord_username} if user.discord_id else None,
-            "twitch":    {"username": user.twitch_username}  if user.twitch_id  else None,
+            "discord":   {"id": user.discord_id, "username": user.discord_username} if user.discord_id else None,
+            "twitch":    {"username": user.twitch_username} if user.twitch_id else None,
             "x_handle":         user.x_handle,
             "instagram_handle": user.instagram_handle,
         },

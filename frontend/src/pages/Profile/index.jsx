@@ -49,6 +49,47 @@ function formatRank(ra) {
   return `${tierCap} ${ra.rank ?? ''} · ${ra.lp ?? 0} LP`
 }
 
+/* ─── Socials hero ─────────────────────────────────────────── */
+function ProfileSocials({ social }) {
+  if (!social) return null
+  const { discord, twitch, x_handle, instagram_handle } = social
+  if (!discord && !twitch && !x_handle && !instagram_handle) return null
+
+  const items = []
+  if (discord?.id) items.push({
+    key: 'discord', label: discord.username, color: '#5865F2',
+    url: `https://discord.com/users/${discord.id}`,
+    svg: <path d="M20.317 4.369A19.79 19.79 0 0 0 16.558 3.2a.07.07 0 0 0-.073.035 13.66 13.66 0 0 0-.61 1.252 18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.252.07.07 0 0 0-.074-.035 19.74 19.74 0 0 0-3.76 1.169.07.07 0 0 0-.031.027C2.533 8.045 1.876 11.612 2.198 15.135a.082.082 0 0 0 .031.056 19.9 19.9 0 0 0 5.993 3.029.07.07 0 0 0 .077-.027 14.2 14.2 0 0 0 1.226-1.994.07.07 0 0 0-.038-.098 13.1 13.1 0 0 1-1.872-.892.07.07 0 0 1-.007-.117c.126-.094.252-.192.372-.291a.07.07 0 0 1 .073-.01c3.927 1.793 8.18 1.793 12.061 0a.07.07 0 0 1 .074.009c.12.099.246.198.373.292a.07.07 0 0 1-.006.117c-.598.349-1.22.645-1.873.892a.07.07 0 0 0-.038.099c.36.698.772 1.362 1.225 1.993a.07.07 0 0 0 .078.027 19.84 19.84 0 0 0 6.002-3.029.07.07 0 0 0 .031-.055c.5-4.073-.838-7.61-3.549-10.74a.06.06 0 0 0-.031-.028zM8.02 12.99c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.211 0 2.176 1.095 2.157 2.42 0 1.333-.955 2.418-2.157 2.418zm7.974 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>,
+  })
+  if (twitch?.username) items.push({
+    key: 'twitch', label: twitch.username, color: '#9146FF',
+    url: `https://twitch.tv/${twitch.username}`,
+    svg: <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/>,
+  })
+  if (x_handle) items.push({
+    key: 'x', label: x_handle, color: '#ffffff',
+    url: `https://x.com/${x_handle}`,
+    svg: <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>,
+  })
+  if (instagram_handle) items.push({
+    key: 'instagram', label: instagram_handle, color: '#E1306C',
+    url: `https://instagram.com/${instagram_handle}`,
+    svg: <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/>,
+  })
+
+  return (
+    <div className="profile-socials">
+      {items.map(it => (
+        <a key={it.key} href={it.url} target="_blank" rel="noopener noreferrer"
+           className="profile-social-link" style={{ '--sc': it.color }}
+           title={`@${it.label}`}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">{it.svg}</svg>
+        </a>
+      ))}
+    </div>
+  )
+}
+
 /* ─── Mini-stepper ajout compte Riot ─── */
 function AddRiotStepper({ onDone, onCancel }) {
   const [step,      setStep]      = useState(0)
@@ -299,7 +340,7 @@ export default function Profile() {
   return (
     <div className="profile-page">
 
-      {/* ─── BANNER IMMERSIF ─── */}
+    {/* ─── BANNER + HERO INTÉGRÉ ─── */}
       <div className="profile-banner" style={{ '--accent': accentColor }}>
         <div className="profile-banner-bg" style={{ background: `linear-gradient(135deg, ${accentColor}28 0%, ${accentColor}08 35%, #171717 75%)` }} />
         {favTeam?.logo && (
@@ -307,10 +348,9 @@ export default function Profile() {
         )}
         <div className="profile-banner-glow" style={{ background: `radial-gradient(circle at 20% 50%, ${accentColor}25, transparent 60%)` }} />
         <div className="profile-banner-overlay" />
-      </div>
 
-      {/* ─── HERO ─── */}
-      <div className="profile-hero">
+        {/* Hero intégré dans la bannière */}
+        <div className="profile-hero">
         <div className="profile-avatar-wrap">
           <div className="profile-avatar" style={{ borderColor: accentColor + '50' }}>
             {avatarSrc
@@ -329,6 +369,7 @@ export default function Profile() {
         <div className="profile-hero-info">
           <div className="profile-hero-tag">PROFIL JOUEUR</div>
           <h1 className="profile-hero-name">{displayName}</h1>
+          <ProfileSocials social={profile?.social} />
           <div className="profile-hero-meta">
             {favTeam ? (
               <button
@@ -358,8 +399,11 @@ export default function Profile() {
             </button>
           )}
         </div>
+        </div>{/* fin .profile-hero */}
+      </div>{/* fin .profile-banner */}
 
-        {/* Stat strip */}
+      {/* ─── STAT STRIP (zone séparée) ─── */}
+      <div className="profile-stats-wrap">
         <div className="profile-stat-strip">
           <div className="pss-item">
             <div className="pss-val" style={{ color: stats.profit >= 0 ? '#65BD62' : '#ef4444' }}>
@@ -380,12 +424,13 @@ export default function Profile() {
           <div className="pss-divider" />
           <div className="pss-item">
             <div className="pss-val">{stats.total}</div>
-            <div className="pss-lbl">Paris</div>
-          </div>
+            <div className="pss-lbl">Total paris</div>
         </div>
-      </div>
+        </div>
+      </div>{/* fin .profile-stats-wrap */}
 
-      {/* ─── COMPTE RIOT PRINCIPAL (full-width showcase) ─── */}
+      {/* ─── COMPTE RIOT PRINCIPAL ─── */}
+
       {primaryAcc && (
         <div className="profile-main-riot" style={{ '--tier-color': tierColor }}>
           <div className="pmr-glow" style={{ background: `radial-gradient(circle at 80% 50%, ${tierColor}22, transparent 60%)` }} />

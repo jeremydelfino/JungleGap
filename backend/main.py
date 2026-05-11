@@ -24,6 +24,7 @@ import models.job_run
 import models.champion_stats
 import models.champion_synergy
 import models.team_form
+import models.lootbox as _lootbox_models  # noqa
 
 # Routers
 from routers import auth, players, bets, coins, profile, upload, admin, games, favorites, leaderboard, social
@@ -32,6 +33,7 @@ from routers import admin_jobs
 from routers.settings import router as settings_router
 from routers import odds_debug
 from routers import coachdiff
+from routers import lootbox
 # Services
 from services.esports_sync import sync_all_teams
 from services.champion_winrate_collector import refresh_champion_winrates
@@ -172,6 +174,8 @@ app.include_router(esports.router)
 app.include_router(admin_jobs.router)
 app.include_router(coachdiff.router)
 app.include_router(social.router)
+app.include_router(lootbox.router)
+
 
 
 

@@ -1,0 +1,182 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from datetime import datetime
+from pydantic import BaseModel
+from typing import Optional
+
+from database import get_db
+from deps import get_current_user
+from models.user import User
+from models.lootbox import LootBox, LootBoxType
+from services.lootbox_service import pick_card_from_box, grant_card_to_user
+
+router = APIRouter(prefix="/lootbox", tags=["lootbox"])
+
+
+# ─── GET /lootbox/my-boxes ─────────────────────────────────
+@router.get("/my-boxes")
+def my_boxes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Caisses non ouvertes de l'user."""
+    boxes = (
+        db.query(LootBox)
+        .filter(LootBox.user_id == current_user.id, LootBox.opened_at.is_(None))
+        .order_by(LootBox.obtained_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": b.id,
+            "obtained_at": b.obtained_at,
+            "box_type": {
+                "id":          b.box_type.id,
+                "name":        b.box_type.name,
+                "description": b.box_type.description,
+                "image_url":   b.box_type.image_url,
+                "drop_rates": {
+                    "common":    b.box_type.drop_common,
+                    "rare":      b.box_type.drop_rare,
+                    "epic":      b.box_type.drop_epic,
+                    "legendary": b.box_type.drop_legendary,
+                },
+            },
+        }
+        for b in boxes
+    ]
+
+
+# ─── GET /lootbox/types (catalogue achetable) ──────────────
+@router.get("/types")
+def list_box_types(db: Session = Depends(get_db)):
+    """Liste des types de caisses actifs (pour shop)."""
+    types = (
+        db.query(LootBoxType)
+        .filter(LootBoxType.is_active == True)
+        .order_by(LootBoxType.price_coins.asc().nulls_last())
+        .all()
+    )
+    return [
+        {
+            "id":          t.id,
+            "name":        t.name,
+            "description": t.description,
+            "image_url":   t.image_url,
+            "price_coins": t.price_coins,
+            "pool_types":  t.pool_types,
+            "drop_rates": {
+                "common":    t.drop_common,
+                "rare":      t.drop_rare,
+                "epic":      t.drop_epic,
+                "legendary": t.drop_legendary,
+            },
+        }
+        for t in types
+    ]
+
+
+# ─── POST /lootbox/{box_id}/open ───────────────────────────
+@router.post("/{box_id}/open")
+def open_box(
+    box_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    box = (
+        db.query(LootBox)
+        .filter(LootBox.id == box_id, LootBox.user_id == current_user.id)
+        .first()
+    )
+    if not box:
+        raise HTTPException(404, "Caisse introuvable")
+    if box.opened_at is not None:
+        raise HTTPException(400, "Caisse déjà ouverte")
+
+    card = pick_card_from_box(db, box.box_type)
+    if not card:
+        raise HTTPException(500, "Pool de cartes vide pour cette caisse")
+
+    grant_card_to_user(db, current_user.id, card.id)
+
+    box.opened_at = datetime.utcnow()
+    box.opened_card_id = card.id
+    db.commit()
+
+    return {
+        "success": True,
+        "card": {
+            "id":         card.id,
+            "name":       card.name,
+            "type":       card.type,
+            "rarity":     card.rarity,
+            "image_url":  card.image_url,
+        },
+    }
+
+
+# ─── ADMIN — Création/édition des types de caisses ─────────
+# (gating is_admin pas encore brancché ici — à toi de voir si tu veux
+#  réutiliser la même mécanique que ton AdminRatings/AdminCards)
+
+class CreateBoxTypeSchema(BaseModel):
+    name:          str
+    description:   Optional[str] = None
+    image_url:     Optional[str] = None
+    price_coins:   Optional[int] = None
+    pool_types:    str            # "champion,sticker,..."
+    drop_common:    int = 60
+    drop_rare:      int = 25
+    drop_epic:      int = 12
+    drop_legendary: int = 3
+
+
+@router.post("/admin/types")
+def admin_create_box_type(
+    body: CreateBoxTypeSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(403, "Admin uniquement")
+
+    total = body.drop_common + body.drop_rare + body.drop_epic + body.drop_legendary
+    if total != 100:
+        raise HTTPException(400, f"Drop rates doivent totaliser 100 (actuel: {total})")
+
+    box_type = LootBoxType(
+        name=body.name,
+        description=body.description,
+        image_url=body.image_url,
+        price_coins=body.price_coins,
+        pool_types=body.pool_types,
+        drop_common=body.drop_common,
+        drop_rare=body.drop_rare,
+        drop_epic=body.drop_epic,
+        drop_legendary=body.drop_legendary,
+    )
+    db.add(box_type)
+    db.commit()
+    db.refresh(box_type)
+    return {"success": True, "id": box_type.id, "name": box_type.name}
+
+
+# ─── ADMIN — Donner une caisse à un user (debug/cadeaux) ───
+@router.post("/admin/grant/{user_id}/{box_type_id}")
+def admin_grant_box(
+    user_id: int,
+    box_type_id: int,
+    quantity: int = 1,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(403, "Admin uniquement")
+    box_type = db.query(LootBoxType).filter(LootBoxType.id == box_type_id).first()
+    if not box_type:
+        raise HTTPException(404, "Type de caisse introuvable")
+
+    for _ in range(quantity):
+        db.add(LootBox(user_id=user_id, box_type_id=box_type_id))
+    db.commit()
+    return {"success": True, "granted": quantity, "to_user_id": user_id}

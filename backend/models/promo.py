@@ -17,9 +17,13 @@ class PromoCode(Base):
     uses_count    = Column(Integer, default=0)
     is_active     = Column(Boolean, default=True)
     created_at    = Column(TIMESTAMP, server_default=func.now())
+    lootbox_type_id  = Column(Integer, ForeignKey("lootbox_types.id"), nullable=True)
+    lootbox_quantity = Column(Integer, default=0)
+
 
     card  = relationship("Card", lazy="joined")
     uses  = relationship("PromoCodeUse", back_populates="promo_code", cascade="all, delete-orphan")
+    lootbox_type = relationship("LootBoxType", lazy="joined")
 
 
 class PromoCodeUse(Base):
