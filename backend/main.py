@@ -26,7 +26,7 @@ import models.champion_synergy
 import models.team_form
 
 # Routers
-from routers import auth, players, bets, coins, profile, upload, admin, games, favorites, leaderboard
+from routers import auth, players, bets, coins, profile, upload, admin, games, favorites, leaderboard, social
 from routers import esports
 from routers import admin_jobs
 from routers.settings import router as settings_router
@@ -171,6 +171,7 @@ app.include_router(leaderboard.router)
 app.include_router(esports.router)
 app.include_router(admin_jobs.router)
 app.include_router(coachdiff.router)
+app.include_router(social.router)
 
 
 

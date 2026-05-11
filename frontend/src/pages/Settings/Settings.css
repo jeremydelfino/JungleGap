@@ -167,6 +167,33 @@
 
 .settings-reward-close { width:100%; justify-content:center; }
 
+/* ─── SOCIALS ─── */
+.settings-social-row { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:16px; background:#ffffff04; border:1px solid #ffffff08; border-radius:12px; margin-bottom:10px; }
+.settings-social-info { display:flex; align-items:center; gap:14px; flex:1; min-width:0; }
+.settings-social-icon { width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.settings-social-discord { background:#5865F215; color:#5865F2; border:1px solid #5865F230; }
+.settings-social-twitch  { background:#9146FF15; color:#9146FF; border:1px solid #9146FF30; }
+.settings-social-name { font-family:'Outfit',sans-serif; font-size:14px; font-weight:800; color:#e8eaf0; margin-bottom:2px; }
+.settings-social-handle { font-family:'Inter',sans-serif; font-size:12px; color:#9ca3af; }
+.settings-social-empty { color:#4b5563; font-style:italic; }
+.settings-social-actions { display:flex; align-items:center; gap:10px; flex-shrink:0; }
+.settings-social-badge { font-family:'Inter',sans-serif; font-size:11px; font-weight:700; color:#65BD62; background:#65BD6212; border:1px solid #65BD6228; padding:5px 10px; border-radius:7px; }
+
+.settings-btn-link { border:none; border-radius:9px; padding:9px 18px; font-family:'Inter',sans-serif; font-size:12px; font-weight:700; cursor:pointer; color:#fff; transition:all 0.2s; display:flex; align-items:center; gap:6px; }
+.settings-btn-link-discord { background:linear-gradient(135deg,#5865F2,#4752C4); }
+.settings-btn-link-discord:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 4px 14px #5865F240; }
+.settings-btn-link-twitch  { background:linear-gradient(135deg,#9146FF,#6f33d6); }
+.settings-btn-link-twitch:hover:not(:disabled)  { transform:translateY(-1px); box-shadow:0 4px 14px #9146FF40; }
+.settings-btn-link:disabled { opacity:0.6; cursor:not-allowed; }
+
+.settings-btn-unlink { background:transparent; border:1px solid #ffffff10; border-radius:8px; padding:7px 14px; font-family:'Inter',sans-serif; font-size:11px; font-weight:600; color:#9ca3af; cursor:pointer; transition:all 0.2s; }
+.settings-btn-unlink:hover { background:#ef444412; border-color:#ef444428; color:#ef4444; }
+
+.settings-social-divider { display:flex; align-items:center; gap:12px; margin:24px 0 18px; font-family:'Inter',sans-serif; font-size:11px; font-weight:700; color:#4b5563; text-transform:uppercase; letter-spacing:1px; }
+.settings-social-divider::before, .settings-social-divider::after { content:""; flex:1; height:1px; background:#ffffff08; }
+
+.settings-social-input-row { display:flex; gap:10px; align-items:stretch; }
+
 /* ─── RESPONSIVE ─── */
 @media (max-width: 700px) {
   .settings-layout { grid-template-columns:1fr; padding:0 16px; }

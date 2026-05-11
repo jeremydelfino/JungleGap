@@ -169,6 +169,18 @@ async def get_my_profile(
             "logo":  current_user.favorite_team_logo,
             "color": current_user.favorite_team_color,
         } if current_user.favorite_team_name else None,
+        "social": {
+            "discord":   {
+                "username":    current_user.discord_username,
+                "verified_at": current_user.discord_verified_at,
+            } if current_user.discord_id else None,
+            "twitch":    {
+                "username":    current_user.twitch_username,
+                "verified_at": current_user.twitch_verified_at,
+            } if current_user.twitch_id else None,
+            "x_handle":         current_user.x_handle,
+            "instagram_handle": current_user.instagram_handle,
+        },
     }
 
 # ─── GET /user/:id (profil public) ──────────────────────────
@@ -195,6 +207,12 @@ def get_public_profile(
             "logo":  user.favorite_team_logo,
             "color": user.favorite_team_color,
         } if user.favorite_team_name else None,
+        "social": {
+            "discord":   {"username": user.discord_username} if user.discord_id else None,
+            "twitch":    {"username": user.twitch_username}  if user.twitch_id  else None,
+            "x_handle":         user.x_handle,
+            "instagram_handle": user.instagram_handle,
+        },
     }
 
 # ─── POST /set-team ──────────────────────────────────────────

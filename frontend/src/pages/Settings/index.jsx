@@ -5,10 +5,11 @@ import useAuthStore from '../../store/auth'
 import './Settings.css'
 
 const TABS = [
-  { id: 'profile',  label: 'Profil',   icon: '👤' },
-  { id: 'security', label: 'Sécurité', icon: '🔒' },
-  { id: 'promo',    label: 'Code promo', icon: '🎁' },
-  { id: 'danger',   label: 'Danger',   icon: '⚠️' },
+  { id: 'profile',  label: 'Profil',                  icon: '👤' },
+  { id: 'security', label: 'Sécurité',                icon: '🔒' },
+  { id: 'socials',  label: 'Réseaux',                 icon: '🔗' },
+  { id: 'promo',    label: 'Code promo',              icon: '🎁' },
+  { id: 'danger',   label: 'Suppression du compte',   icon: '⚠️' },
 ]
 
 /* ─── TOAST ─── */
@@ -113,27 +114,81 @@ export default function Settings() {
   const [reward, setReward]         = useState(null)   // { rewards, coinsTotal }
 
   /* ── Profile form ── */
-  const [profileForm, setProfileForm] = useState({ username: '' })
+  const [profileForm, setProfileForm]       = useState({ username: '' })
   const [profileLoading, setProfileLoading] = useState(false)
 
   /* ── Password form ── */
-  const [pwdForm, setPwdForm]     = useState({ current: '', next: '', confirm: '' })
+  const [pwdForm, setPwdForm]       = useState({ current: '', next: '', confirm: '' })
   const [pwdLoading, setPwdLoading] = useState(false)
-  const [showPwd, setShowPwd]     = useState({ current: false, next: false, confirm: false })
+  const [showPwd, setShowPwd]       = useState({ current: false, next: false, confirm: false })
 
   /* ── Promo form ── */
-  const [promoCode, setPromoCode]   = useState('')
+  const [promoCode, setPromoCode]       = useState('')
   const [promoLoading, setPromoLoading] = useState(false)
 
   /* ── Delete ── */
   const [deleteLoading, setDeleteLoading] = useState(false)
 
+  /* ── Socials ── */
+  const [socials, setSocials] = useState({
+    discord:          null,  // { username, verified_at } | null
+    twitch:           null,
+    x_handle:         '',
+    instagram_handle: '',
+  })
+  const [socialsLoading, setSocialsLoading] = useState({ discord: false, twitch: false, links: false })
+  const [handlesForm,    setHandlesForm]    = useState({ x_handle: '', instagram_handle: '' })
+
+  /* ── Load profile + socials ── */
   useEffect(() => {
     if (!user) { navigate('/login'); return }
     api.get('/profile/me')
-      .then(r => setProfileForm({ username: r.data.username || '' }))
+      .then(r => {
+        setProfileForm({ username: r.data.username || '' })
+        const s = r.data.social || {}
+        setSocials({
+          discord:          s.discord || null,
+          twitch:           s.twitch  || null,
+          x_handle:         s.x_handle         || '',
+          instagram_handle: s.instagram_handle || '',
+        })
+        setHandlesForm({
+          x_handle:         s.x_handle         || '',
+          instagram_handle: s.instagram_handle || '',
+        })
+      })
       .catch(() => {})
   }, [user])
+
+  /* ── Retour callback OAuth ── */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const flag = params.get('social')
+    if (!flag) return
+
+    const [platform, status] = flag.split('_')
+    if (status === 'ok') {
+      setToast({ msg: `Compte ${platform === 'discord' ? 'Discord' : 'Twitch'} lié avec succès !`, type: 'success' })
+      setTab('socials')
+      api.get('/profile/me').then(r => {
+        const s = r.data.social || {}
+        setSocials(prev => ({
+          ...prev,
+          discord: s.discord || null,
+          twitch:  s.twitch  || null,
+        }))
+      })
+    } else if (status === 'err') {
+      const reason = params.get('reason') || ''
+      const map = {
+        already_linked: 'Ce compte est déjà lié à un autre utilisateur JungleGap',
+        state_invalid:  'Lien expiré, recommence',
+      }
+      setToast({ msg: map[reason] || `Erreur lors de la liaison ${platform}`, type: 'error' })
+      setTab('socials')
+    }
+    window.history.replaceState({}, '', '/settings')
+  }, [])
 
   const notify = (msg, type = 'success') => setToast({ msg, type })
 
@@ -197,6 +252,54 @@ export default function Settings() {
       notify(err.response?.data?.detail || 'Erreur lors de la suppression', 'error')
       setDeleteLoading(false)
       setShowDelete(false)
+    }
+  }
+
+  /* ── Lier Discord/Twitch ── */
+  const handleConnect = async (platform) => {
+    setSocialsLoading(s => ({ ...s, [platform]: true }))
+    try {
+      const { data } = await api.get(`/social/${platform}/connect`)
+      window.location.href = data.url
+    } catch {
+      notify(`Impossible de lier ${platform}`, 'error')
+      setSocialsLoading(s => ({ ...s, [platform]: false }))
+    }
+  }
+
+  /* ── Délier ── */
+  const handleUnlink = async (platform) => {
+    try {
+      await api.delete(`/social/${platform}`)
+      setSocials(s => ({
+        ...s,
+        ...(platform === 'discord'   && { discord: null }),
+        ...(platform === 'twitch'    && { twitch:  null }),
+        ...(platform === 'x'         && { x_handle: '' }),
+        ...(platform === 'instagram' && { instagram_handle: '' }),
+      }))
+      if (platform === 'x')         setHandlesForm(f => ({ ...f, x_handle: '' }))
+      if (platform === 'instagram') setHandlesForm(f => ({ ...f, instagram_handle: '' }))
+      notify('Compte délié', 'success')
+    } catch (err) {
+      notify(err.response?.data?.detail || 'Erreur', 'error')
+    }
+  }
+
+  /* ── Save handles X / Instagram ── */
+  const handleSaveLinks = async () => {
+    setSocialsLoading(s => ({ ...s, links: true }))
+    try {
+      const { data } = await api.post('/social/links', {
+        x_handle:         handlesForm.x_handle.trim()         || null,
+        instagram_handle: handlesForm.instagram_handle.trim() || null,
+      })
+      setSocials(s => ({ ...s, x_handle: data.x_handle || '', instagram_handle: data.instagram_handle || '' }))
+      notify('Handles enregistrés', 'success')
+    } catch (err) {
+      notify(err.response?.data?.detail || 'Erreur', 'error')
+    } finally {
+      setSocialsLoading(s => ({ ...s, links: false }))
     }
   }
 
@@ -352,6 +455,139 @@ export default function Settings() {
                   </button>
                 </div>
               </form>
+            </div>
+          )}
+
+          {/* ─── RÉSEAUX ─── */}
+          {tab === 'socials' && (
+            <div className="settings-section" key="socials">
+              <div className="settings-section-header">
+                <div className="settings-section-icon-wrap"><span>🔗</span></div>
+                <div>
+                  <div className="settings-section-title">Réseaux sociaux</div>
+                  <div className="settings-section-desc">Lie tes comptes pour les afficher sur ton profil</div>
+                </div>
+              </div>
+
+              {/* ── Discord ── */}
+              <div className="settings-social-row">
+                <div className="settings-social-info">
+                  <div className="settings-social-icon settings-social-discord">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+                  </div>
+                  <div>
+                    <div className="settings-social-name">Discord</div>
+                    {socials.discord
+                      ? <div className="settings-social-handle">@{socials.discord.username}</div>
+                      : <div className="settings-social-handle settings-social-empty">Non lié</div>
+                    }
+                  </div>
+                </div>
+                <div className="settings-social-actions">
+                  {socials.discord
+                    ? <>
+                        <span className="settings-social-badge">✓ Vérifié</span>
+                        <button className="settings-btn-unlink" onClick={() => handleUnlink('discord')}>Délier</button>
+                      </>
+                    : <button className="settings-btn-link settings-btn-link-discord" onClick={() => handleConnect('discord')} disabled={socialsLoading.discord}>
+                        {socialsLoading.discord ? <span className="settings-spinner" /> : 'Lier'}
+                      </button>
+                  }
+                </div>
+              </div>
+
+              {/* ── Twitch ── */}
+              <div className="settings-social-row">
+                <div className="settings-social-info">
+                  <div className="settings-social-icon settings-social-twitch">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></svg>
+                  </div>
+                  <div>
+                    <div className="settings-social-name">Twitch</div>
+                    {socials.twitch
+                      ? <div className="settings-social-handle">@{socials.twitch.username}</div>
+                      : <div className="settings-social-handle settings-social-empty">Non lié</div>
+                    }
+                  </div>
+                </div>
+                <div className="settings-social-actions">
+                  {socials.twitch
+                    ? <>
+                        <span className="settings-social-badge">✓ Vérifié</span>
+                        <button className="settings-btn-unlink" onClick={() => handleUnlink('twitch')}>Délier</button>
+                      </>
+                    : <button className="settings-btn-link settings-btn-link-twitch" onClick={() => handleConnect('twitch')} disabled={socialsLoading.twitch}>
+                        {socialsLoading.twitch ? <span className="settings-spinner" /> : 'Lier'}
+                      </button>
+                  }
+                </div>
+              </div>
+
+              {/* ── Séparateur ── */}
+              <div className="settings-social-divider">
+                <span>Liens manuels</span>
+              </div>
+
+              {/* ── X (Twitter) ── */}
+              <div className="settings-field">
+                <label className="settings-label">
+                  X (Twitter)
+                  <span className="settings-label-hint">4–15 caractères</span>
+                </label>
+                <div className="settings-social-input-row">
+                  <div className="settings-input-wrap" style={{ flex: 1 }}>
+                    <span className="settings-input-prefix">@</span>
+                    <input
+                      className="settings-input settings-input-prefixed"
+                      type="text"
+                      placeholder="pseudo_x"
+                      value={handlesForm.x_handle}
+                      onChange={e => setHandlesForm(f => ({ ...f, x_handle: e.target.value }))}
+                      maxLength={15}
+                    />
+                  </div>
+                  {socials.x_handle && (
+                    <button className="settings-btn-unlink" onClick={() => handleUnlink('x')}>Supprimer</button>
+                  )}
+                </div>
+              </div>
+
+              {/* ── Instagram ── */}
+              <div className="settings-field">
+                <label className="settings-label">
+                  Instagram
+                  <span className="settings-label-hint">1–30 caractères</span>
+                </label>
+                <div className="settings-social-input-row">
+                  <div className="settings-input-wrap" style={{ flex: 1 }}>
+                    <span className="settings-input-prefix">@</span>
+                    <input
+                      className="settings-input settings-input-prefixed"
+                      type="text"
+                      placeholder="pseudo_ig"
+                      value={handlesForm.instagram_handle}
+                      onChange={e => setHandlesForm(f => ({ ...f, instagram_handle: e.target.value }))}
+                      maxLength={30}
+                    />
+                  </div>
+                  {socials.instagram_handle && (
+                    <button className="settings-btn-unlink" onClick={() => handleUnlink('instagram')}>Supprimer</button>
+                  )}
+                </div>
+              </div>
+
+              <div className="settings-form-footer">
+                <div className="settings-security-hint">
+                  <span>💡</span>
+                  <span>Ces handles ne sont pas vérifiés, ils servent juste de lien</span>
+                </div>
+                <button className="settings-btn-primary" onClick={handleSaveLinks} disabled={socialsLoading.links}>
+                  {socialsLoading.links
+                    ? <><span className="settings-spinner" /> Enregistrement…</>
+                    : <><span>Enregistrer</span><span className="settings-btn-shine" /></>
+                  }
+                </button>
+              </div>
             </div>
           )}
 

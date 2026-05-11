@@ -36,3 +36,13 @@ class User(Base):
         cascade="all, delete-orphan",
         order_by="RiotAccount.is_primary.desc(), RiotAccount.created_at.asc()",
     )
+
+    # ─── Réseaux sociaux ──────────────────────────────────────
+    discord_id          = Column(String(50), unique=True, nullable=True)
+    discord_username    = Column(String(50), nullable=True)
+    discord_verified_at = Column(TIMESTAMP, nullable=True)
+    twitch_id           = Column(String(50), unique=True, nullable=True)
+    twitch_username     = Column(String(50), nullable=True)
+    twitch_verified_at  = Column(TIMESTAMP, nullable=True)
+    x_handle            = Column(String(30), nullable=True)
+    instagram_handle    = Column(String(40), nullable=True)
