@@ -18,4 +18,5 @@ class Card(Base):
     is_banner       = Column(Boolean, default=False)
     is_title        = Column(Boolean, default=False)
     title_text      = Column(String(100), nullable=True)
+    collection      = Column(String(100), nullable=True)
     created_at      = Column(TIMESTAMP, server_default=func.now())

@@ -14,7 +14,7 @@ import Settings from './pages/Settings/index.jsx'
 import Games from './pages/Games/index.jsx'
 import CoachDiff from './pages/CoachDiff/index.jsx'
 import CoachDiffGame from './pages/CoachDiffGame/index.jsx'
-
+import LootBox from './pages/LootBox/index.jsx'
 import Footer from './components/layout/Footer/index.jsx'
 
 function WithNavbar() {
@@ -47,6 +47,7 @@ export default function App() {
           <Route path="/games"                         element={<Games />} />
           <Route path="/games/coachdiff"               element={<CoachDiff />} />
           <Route path="/games/coachdiff/:gameId"       element={<CoachDiffGame />} />
+          <Route path="/lootbox"                       element={<LootBox />} />
         </Route>
       </Routes>
     </BrowserRouter>

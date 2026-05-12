@@ -125,6 +125,7 @@ def list_cards(db: Session = Depends(get_db)):
             "is_banner": c.is_banner,
             "is_title": c.is_title,
             "title_text": c.title_text,
+            "collection": c.collection,
         }
         for c in cards
     ]
@@ -144,6 +145,7 @@ async def create_card(
     is_banner:     bool          = Form(False),
     is_title:      bool          = Form(False),
     title_text:    Optional[str] = Form(None),
+    collection:    Optional[str] = Form(None),
     # Image
     file:          UploadFile    = File(...),
     db:            Session       = Depends(get_db),
@@ -172,6 +174,7 @@ async def create_card(
         trigger_value=trigger_value,
         is_banner=is_banner,
         is_title=is_title,
+        collection=collection,
         title_text=title_text,
     )
     db.add(card)

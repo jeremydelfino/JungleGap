@@ -1,0 +1,199 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600&display=swap');
+
+/* ─── ANIMATIONS ─── */
+@keyframes lb-fade-up        { from{opacity:0; transform:translateY(20px)} to{opacity:1; transform:translateY(0)} }
+@keyframes lb-fade-in        { from{opacity:0} to{opacity:1} }
+@keyframes lb-glow-pulse     { 0%,100%{opacity:0.3} 50%{opacity:0.6} }
+@keyframes lb-shimmer        { 0%{transform:translateX(-150%)} 100%{transform:translateX(250%)} }
+@keyframes lb-skeleton       { 0%,100%{opacity:0.4} 50%{opacity:0.7} }
+@keyframes lb-shake-box      { 0%,100%{transform:translate(0,0) rotate(0)} 25%{transform:translate(-4px,2px) rotate(-3deg)} 50%{transform:translate(4px,-2px) rotate(3deg)} 75%{transform:translate(-3px,3px) rotate(-2deg)} }
+@keyframes lb-rays-rotate    { from{transform:rotate(0)} to{transform:rotate(360deg)} }
+@keyframes lb-burst          { 0%{opacity:0; transform:scale(0.2)} 30%{opacity:1} 100%{opacity:0; transform:scale(2.5)} }
+@keyframes lb-reveal-pop     { 0%{opacity:0; transform:scale(0.5) rotateY(180deg)} 60%{transform:scale(1.08) rotateY(0)} 100%{opacity:1; transform:scale(1) rotateY(0)} }
+@keyframes lb-card-float     { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+@keyframes lb-tab-slide      { from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:translateY(0)} }
+@keyframes lb-bar-fill       { from{width:0} }
+
+/* ─── BASE PAGE ─── */
+.lb-page                     { min-height:100vh; background:#171717; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E"); background-size:256px; position:relative; overflow-x:hidden; padding:0 32px 100px; }
+
+/* ─── GLOWS ─── */
+.lb-glow                     { position:absolute; border-radius:50%; filter:blur(120px); pointer-events:none; z-index:0; }
+.lb-glow-1                   { width:700px; height:500px; background:#c89b3c08; top:-100px; left:-150px; animation:lb-glow-pulse 6s ease-in-out infinite; }
+.lb-glow-2                   { width:600px; height:500px; background:#a855f708; top:200px; right:-150px; animation:lb-glow-pulse 7s ease-in-out infinite 2s; }
+.lb-glow-3                   { width:500px; height:400px; background:#3b82f608; bottom:300px; left:30%; animation:lb-glow-pulse 8s ease-in-out infinite 4s; }
+
+/* ─── HERO ─── */
+.lb-hero                     { position:relative; z-index:1; max-width:1280px; margin:0 auto; padding:72px 0 40px; text-align:center; animation:lb-fade-up 0.6s ease both; }
+.lb-hero-eyebrow             { font-family:'Inter',sans-serif; font-size:11px; font-weight:700; letter-spacing:3px; color:#c89b3c; margin-bottom:14px; }
+.lb-hero-title               { font-family:'Outfit',sans-serif; font-size:54px; font-weight:900; letter-spacing:-2px; margin:0 0 12px; background:linear-gradient(90deg, #e8eaf0 0%, #c89b3c 50%, #e8eaf0 100%); background-size:200% auto; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; animation:lb-glow-pulse 4s ease-in-out infinite; }
+.lb-hero-sub                 { font-family:'Inter',sans-serif; font-size:15px; color:#9ca3af; margin:0 auto 36px; max-width:560px; line-height:1.5; }
+.lb-hero-stats               { display:flex; align-items:center; justify-content:center; gap:32px; padding:22px 36px; background:#1f1f1f; border:1px solid #ffffff09; border-radius:16px; box-shadow:0 12px 32px #00000060, inset 0 1px 0 #ffffff05; max-width:880px; margin:0 auto; }
+.lb-hero-stat                { display:flex; flex-direction:column; align-items:center; min-width:120px; }
+.lb-hero-stat-val            { font-family:'Outfit',sans-serif; font-size:28px; font-weight:900; color:#e8eaf0; line-height:1; letter-spacing:-1px; }
+.lb-hero-stat-tot            { font-size:16px; color:#6b7280; font-weight:700; margin-left:2px; }
+.lb-hero-stat-gold           { color:#c89b3c; }
+.lb-hero-stat-purple         { color:#a855f7; }
+.lb-hero-stat-green          { color:#65BD62; }
+.lb-hero-stat-lbl            { font-family:'Inter',sans-serif; font-size:10px; font-weight:600; letter-spacing:1.5px; color:#9ca3af; text-transform:uppercase; margin-top:8px; }
+.lb-hero-stat-divider        { width:1px; height:40px; background:linear-gradient(to bottom, transparent, #ffffff15, transparent); }
+
+/* ─── ERROR ─── */
+.lb-error                    { max-width:1280px; margin:0 auto 24px; background:#ef444412; border:1px solid #ef444440; color:#fca5a5; padding:14px 18px; border-radius:12px; font-family:'Inter',sans-serif; font-size:14px; font-weight:600; animation:lb-fade-up 0.3s ease both; position:relative; z-index:1; }
+
+/* ─── TABS ─── */
+.lb-tabs-wrap                { position:relative; z-index:1; max-width:1280px; margin:0 auto 28px; }
+.lb-tabs                     { display:flex; gap:6px; padding:6px; background:#1c1c1c; border:1px solid #ffffff08; border-radius:14px; box-shadow:0 8px 24px #00000050; }
+.lb-tab                      { flex:1; display:flex; align-items:center; justify-content:center; gap:10px; padding:14px 16px; background:transparent; border:none; border-radius:10px; cursor:pointer; font-family:'Outfit',sans-serif; font-weight:700; font-size:14px; color:#6b7280; transition:all 0.2s ease; position:relative; }
+.lb-tab:hover                { color:#9ca3af; background:#ffffff04; }
+.lb-tab.active               { background:linear-gradient(180deg, #c89b3c20, #c89b3c08); color:#e8eaf0; box-shadow:inset 0 0 0 1px #c89b3c40, 0 0 20px #c89b3c15; }
+.lb-tab-icon                 { font-size:16px; }
+.lb-tab-label                { letter-spacing:0.3px; }
+.lb-tab-badge                { background:#c89b3c; color:#0f0f0f; font-family:'Outfit',sans-serif; font-weight:900; font-size:11px; padding:2px 8px; border-radius:10px; }
+
+/* ─── CONTENT WRAPPER ─── */
+.lb-content                  { position:relative; z-index:1; max-width:1280px; margin:0 auto; animation:lb-tab-slide 0.3s ease both; }
+
+/* ─── SKELETON ─── */
+.lb-skeleton-grid            { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:20px; }
+.lb-skeleton                 { height:280px; background:linear-gradient(180deg, #1c1c1c 0%, #1a1a1a 100%); border:1px solid #ffffff08; border-radius:16px; animation:lb-skeleton 1.5s ease-in-out infinite; }
+
+/* ─── EMPTY ─── */
+.lb-empty                    { background:linear-gradient(180deg, #1c1c1c 0%, #1a1a1a 100%); border:1px dashed #ffffff15; border-radius:16px; padding:60px 24px; text-align:center; }
+.lb-empty-soft               { padding:36px 24px; margin-top:14px; }
+.lb-empty-icon               { font-size:56px; margin-bottom:14px; opacity:0.4; }
+.lb-empty-title              { font-family:'Outfit',sans-serif; font-size:18px; font-weight:800; color:#e8eaf0; margin-bottom:6px; }
+.lb-empty-sub                { font-family:'Inter',sans-serif; font-size:13px; color:#6b7280; }
+.lb-empty-cta                { margin:20px auto 0; max-width:260px; }
+
+/* ════════════════════════════════════════════════════════════ */
+/* COLLECTION VIEW                                              */
+/* ════════════════════════════════════════════════════════════ */
+.lb-collections              { display:flex; flex-direction:column; gap:32px; }
+.lb-coll                     { background:linear-gradient(180deg, #1c1c1c 0%, #1a1a1a 100%); border:1px solid #ffffff10; border-radius:18px; padding:24px; animation:lb-fade-up 0.5s ease both; }
+.lb-coll-head                { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:22px; flex-wrap:wrap; }
+.lb-coll-eyebrow             { font-family:'Inter',sans-serif; font-size:10px; font-weight:700; letter-spacing:2.5px; color:#9ca3af; margin-bottom:4px; }
+.lb-coll-name                { font-family:'Outfit',sans-serif; font-size:24px; font-weight:900; color:#e8eaf0; margin:0; letter-spacing:-0.5px; }
+.lb-coll-progress            { display:flex; align-items:center; gap:14px; flex:1; max-width:380px; min-width:240px; }
+.lb-coll-count               { font-family:'Outfit',sans-serif; font-weight:900; font-size:20px; color:#65BD62; }
+.lb-coll-total               { color:#6b7280; font-size:14px; font-weight:700; }
+.lb-coll-bar                 { flex:1; height:8px; background:#0f0f0f; border:1px solid #ffffff08; border-radius:6px; overflow:hidden; }
+.lb-coll-bar-fill            { height:100%; background:linear-gradient(90deg, #65BD62, #c89b3c); border-radius:5px; box-shadow:0 0 12px #c89b3c40; animation:lb-bar-fill 0.8s cubic-bezier(0.4,0,0.2,1); }
+.lb-coll-pct                 { font-family:'Outfit',sans-serif; font-weight:800; font-size:14px; color:#c89b3c; min-width:40px; text-align:right; }
+
+.lb-coll-grid                { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:14px; }
+
+/* ─── CARD SLOT ─── */
+.lb-slot                     { display:flex; flex-direction:column; gap:8px; animation:lb-fade-up 0.4s ease both; }
+.lb-slot-card                { position:relative; }
+.lb-slot.locked .lb-slot-card { filter:grayscale(1) brightness(0.4) contrast(0.8); transition:filter 0.25s; }
+.lb-slot.locked:hover .lb-slot-card { filter:grayscale(1) brightness(0.55); }
+.lb-slot-lock-overlay        { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:32px; opacity:0.6; pointer-events:none; }
+
+.lb-slot-footer              { display:flex; align-items:center; justify-content:space-between; gap:6px; height:28px; }
+.lb-slot-qty                 { font-family:'Outfit',sans-serif; font-weight:800; font-size:13px; color:#e8eaf0; display:flex; align-items:center; gap:6px; }
+.lb-slot-eq                  { color:#65BD62; font-size:10px; }
+.lb-slot-sell                { background:#c89b3c15; border:1px solid #c89b3c40; color:#e2b147; font-family:'Outfit',sans-serif; font-weight:800; font-size:11px; padding:4px 10px; border-radius:6px; cursor:pointer; transition:all 0.15s ease; letter-spacing:0.3px; }
+.lb-slot-sell:hover:not(:disabled) { background:#c89b3c30; color:#fff; transform:translateY(-1px); }
+.lb-slot-sell:disabled       { opacity:0.4; cursor:not-allowed; }
+.lb-slot-locked-label        { font-family:'Inter',sans-serif; font-size:10px; font-weight:600; color:#4b5563; letter-spacing:0.5px; text-transform:uppercase; }
+
+/* ════════════════════════════════════════════════════════════ */
+/* BOXES & SHOP                                                 */
+/* ════════════════════════════════════════════════════════════ */
+.lb-boxes-grid               { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:20px; }
+.lb-shop-grid                { display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:20px; margin-bottom:32px; }
+.lb-shop-section-title       { font-family:'Outfit',sans-serif; font-size:18px; font-weight:800; color:#e8eaf0; margin:0 0 18px; letter-spacing:-0.3px; display:flex; align-items:center; gap:10px; }
+
+/* Box card (inventory) */
+.lb-box-card                 { position:relative; background:linear-gradient(180deg, #1f1f1f 0%, #1a1a1a 100%); border:1px solid #ffffff10; border-radius:16px; overflow:hidden; transition:all 0.3s cubic-bezier(0.4,0,0.2,1); display:flex; flex-direction:column; animation:lb-fade-up 0.4s ease both; }
+.lb-box-card:hover           { border-color:#c89b3c40; transform:translateY(-4px); box-shadow:0 16px 40px #00000080, 0 0 30px #c89b3c10; }
+.lb-box-img-wrap             { position:relative; aspect-ratio:1.4/1; background:radial-gradient(circle at center, #c89b3c10, #0f0f0f 70%); border-bottom:1px solid #ffffff08; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.lb-box-img-wrap img         { width:65%; height:65%; object-fit:contain; filter:drop-shadow(0 8px 20px #00000080); }
+.lb-box-placeholder          { font-size:80px; filter:drop-shadow(0 8px 20px #00000080); }
+.lb-box-count-badge          { position:absolute; top:12px; right:12px; background:#c89b3c; color:#0f0f0f; font-family:'Outfit',sans-serif; font-weight:900; font-size:14px; padding:4px 12px; border-radius:20px; box-shadow:0 4px 12px #c89b3c40; }
+.lb-box-body                 { padding:18px; display:flex; flex-direction:column; gap:12px; }
+.lb-box-name                 { font-family:'Outfit',sans-serif; font-size:18px; font-weight:800; color:#e8eaf0; letter-spacing:-0.3px; }
+.lb-box-desc                 { font-family:'Inter',sans-serif; font-size:12px; color:#9ca3af; line-height:1.4; }
+.lb-box-rates                { display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; padding:10px; background:#00000030; border:1px solid #ffffff05; border-radius:10px; }
+.lb-rate                     { display:flex; flex-direction:column; align-items:center; gap:3px; }
+.lb-rate-dot                 { width:6px; height:6px; border-radius:50%; background:var(--rc); box-shadow:0 0 6px var(--rc); }
+.lb-rate-val                 { font-family:'Outfit',sans-serif; font-size:12px; font-weight:800; color:#e8eaf0; }
+
+/* Shop card */
+.lb-shop-card                { position:relative; background:linear-gradient(180deg, #1f1f1f 0%, #1a1a1a 100%); border:1px solid #ffffff10; border-radius:16px; overflow:hidden; transition:all 0.3s cubic-bezier(0.4,0,0.2,1); display:flex; flex-direction:column; animation:lb-fade-up 0.4s ease both; }
+.lb-shop-card:hover          { border-color:#a855f740; transform:translateY(-4px); box-shadow:0 16px 40px #00000080, 0 0 30px #a855f710; }
+.lb-shop-card:hover .lb-shop-glow { opacity:1; }
+.lb-shop-glow                { position:absolute; inset:0; background:radial-gradient(circle at 50% 0%, #a855f720, transparent 60%); opacity:0; transition:opacity 0.3s ease; pointer-events:none; }
+.lb-shop-img-wrap            { position:relative; aspect-ratio:1.6/1; background:radial-gradient(circle at center, #a855f715, #0f0f0f 70%); border-bottom:1px solid #ffffff08; display:flex; align-items:center; justify-content:center; }
+.lb-shop-img-wrap img        { width:60%; height:60%; object-fit:contain; filter:drop-shadow(0 8px 20px #00000080); }
+.lb-shop-placeholder         { font-size:80px; filter:drop-shadow(0 8px 20px #00000080); }
+.lb-shop-body                { padding:20px; display:flex; flex-direction:column; gap:14px; flex:1; }
+.lb-shop-name                { font-family:'Outfit',sans-serif; font-size:20px; font-weight:800; color:#e8eaf0; letter-spacing:-0.5px; }
+.lb-shop-desc                { font-family:'Inter',sans-serif; font-size:13px; color:#9ca3af; line-height:1.4; }
+.lb-shop-rates               { display:flex; flex-direction:column; gap:8px; padding:14px; background:#00000030; border:1px solid #ffffff05; border-radius:10px; }
+.lb-rate-bar                 { display:grid; grid-template-columns:90px 1fr 40px; align-items:center; gap:10px; }
+.lb-rate-bar-label           { display:flex; align-items:center; gap:6px; font-family:'Inter',sans-serif; font-size:11px; font-weight:600; color:#c0c4cc; }
+.lb-rate-bar-track           { height:6px; background:#0f0f0f; border-radius:4px; overflow:hidden; border:1px solid #ffffff05; }
+.lb-rate-bar-fill            { height:100%; background:var(--rc); border-radius:3px; box-shadow:0 0 8px var(--rc); animation:lb-bar-fill 0.6s cubic-bezier(0.4,0,0.2,1); }
+.lb-rate-bar-val             { font-family:'Outfit',sans-serif; font-size:13px; font-weight:800; color:var(--rc); text-align:right; }
+
+/* Buttons */
+.lb-btn-primary,
+.lb-btn-buy                  { position:relative; overflow:hidden; width:100%; font-family:'Outfit',sans-serif; font-weight:800; font-size:14px; padding:13px 16px; border-radius:10px; border:none; cursor:pointer; transition:all 0.2s ease; letter-spacing:0.5px; display:flex; align-items:center; justify-content:center; gap:8px; margin-top:auto; }
+.lb-btn-primary              { background:linear-gradient(180deg, #65BD62, #4ea34c); color:#0f0f0f; box-shadow:0 4px 14px #65BD6230; }
+.lb-btn-primary:hover        { background:linear-gradient(180deg, #7ad177, #65BD62); transform:translateY(-1px); box-shadow:0 6px 20px #65BD6240; }
+.lb-btn-primary:disabled     { background:#2a2a2a; color:#6b7280; cursor:not-allowed; box-shadow:none; transform:none; }
+.lb-btn-buy                  { background:linear-gradient(180deg, #c89b3c, #a47b2c); color:#0f0f0f; box-shadow:0 4px 14px #c89b3c30; }
+.lb-btn-buy:hover            { background:linear-gradient(180deg, #e2b147, #c89b3c); transform:translateY(-1px); box-shadow:0 6px 20px #c89b3c40; }
+.lb-btn-buy:disabled         { background:#2a2a2a; color:#6b7280; cursor:not-allowed; box-shadow:none; transform:none; }
+.lb-btn-shimmer              { position:absolute; top:0; left:0; height:100%; width:60%; background:linear-gradient(90deg, transparent, #ffffff30, transparent); animation:lb-shimmer 3s ease-in-out infinite; pointer-events:none; }
+.lb-btn-primary:disabled .lb-btn-shimmer,
+.lb-btn-buy:disabled .lb-btn-shimmer { display:none; }
+.lb-coin                     { font-size:16px; color:#e2b147; }
+
+/* ════════════════════════════════════════════════════════════ */
+/* REVEAL OVERLAY                                              */
+/* ════════════════════════════════════════════════════════════ */
+.lb-overlay                  { position:fixed; inset:0; z-index:1000; display:flex; align-items:center; justify-content:center; animation:lb-fade-in 0.3s ease both; }
+.lb-overlay-bg               { position:absolute; inset:0; background:radial-gradient(circle at center, #000000cc 0%, #000000f0 100%); backdrop-filter:blur(10px); }
+.lb-stage                    { position:relative; z-index:1; display:flex; flex-direction:column; align-items:center; gap:24px; }
+.lb-stage-rays               { position:absolute; width:600px; height:600px; top:50%; left:50%; transform:translate(-50%,-50%); background:conic-gradient(from 0deg, transparent 0deg, #c89b3c20 30deg, transparent 60deg, #c89b3c20 120deg, transparent 150deg, #c89b3c20 210deg, transparent 240deg, #c89b3c20 300deg, transparent 330deg); animation:lb-rays-rotate 8s linear infinite; pointer-events:none; }
+.lb-stage-box                { font-size:160px; animation:lb-shake-box 0.4s ease-in-out infinite; filter:drop-shadow(0 20px 40px #c89b3c80); position:relative; z-index:2; }
+.lb-stage-text               { font-family:'Outfit',sans-serif; font-weight:800; font-size:22px; color:#e8eaf0; letter-spacing:2px; position:relative; z-index:2; }
+.lb-stage-revealed           { animation:lb-reveal-pop 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.lb-burst                    { position:absolute; width:400px; height:400px; top:50%; left:50%; transform:translate(-50%,-50%); border-radius:50%; background:radial-gradient(circle, var(--rc) 0%, transparent 60%); animation:lb-burst 1.2s ease-out both; pointer-events:none; }
+.lb-r-common                 { --rc:#9ca3af; }
+.lb-r-rare                   { --rc:#3b82f6; }
+.lb-r-epic                   { --rc:#a855f7; }
+.lb-r-legendary              { --rc:#c89b3c; }
+.lb-reveal-rarity            { font-family:'Outfit',sans-serif; font-weight:900; font-size:14px; letter-spacing:6px; color:var(--rc); text-shadow:0 0 20px var(--rc); position:relative; z-index:2; }
+.lb-reveal-card-wrap         { position:relative; z-index:2; animation:lb-card-float 3s ease-in-out infinite; filter:drop-shadow(0 0 40px var(--rc)) drop-shadow(0 20px 40px #000000aa); }
+.lb-reveal-name              { font-family:'Outfit',sans-serif; font-weight:900; font-size:32px; color:#e8eaf0; letter-spacing:-0.5px; text-align:center; position:relative; z-index:2; }
+.lb-btn-continue             { padding:14px 36px; min-width:200px; position:relative; z-index:2; }
+
+/* ─── RESPONSIVE ─── */
+@media (max-width: 900px) {
+  .lb-page                   { padding:0 20px 80px; }
+  .lb-hero                   { padding:48px 0 32px; }
+  .lb-hero-title             { font-size:40px; }
+  .lb-hero-stats             { padding:18px 20px; gap:16px; flex-wrap:wrap; }
+  .lb-hero-stat              { min-width:90px; }
+  .lb-hero-stat-val          { font-size:22px; }
+  .lb-hero-stat-divider      { display:none; }
+  .lb-tab-label              { display:none; }
+  .lb-tab                    { padding:12px; }
+  .lb-tab-icon               { font-size:20px; }
+  .lb-coll-name              { font-size:20px; }
+  .lb-coll-grid              { grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:10px; }
+  .lb-rate-bar               { grid-template-columns:80px 1fr 36px; gap:8px; }
+  .lb-reveal-name            { font-size:24px; }
+}
+
+@media (max-width: 560px) {
+  .lb-boxes-grid,
+  .lb-shop-grid              { grid-template-columns:1fr; }
+  .lb-hero-title             { font-size:30px; }
+  .lb-stage-box              { font-size:110px; }
+  .lb-stage-rays             { width:400px; height:400px; }
+}

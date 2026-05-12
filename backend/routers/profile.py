@@ -8,6 +8,7 @@ from deps import get_current_user
 from models.riot_account import RiotAccount
 from services import riot
 import random
+from routers.cards import _equipped_stickers_for
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
@@ -182,6 +183,7 @@ async def get_my_profile(
             "x_handle":         current_user.x_handle,
             "instagram_handle": current_user.instagram_handle,
         },
+        "equipped_stickers": _equipped_stickers_for(db, current_user.id),
     }
 
 # ─── GET /user/:id (profil public) ──────────────────────────
@@ -214,6 +216,7 @@ def get_public_profile(
             "x_handle":         user.x_handle,
             "instagram_handle": user.instagram_handle,
         },
+        "equipped_stickers": _equipped_stickers_for(db, user.id),
     }
 
 # ─── POST /set-team ──────────────────────────────────────────

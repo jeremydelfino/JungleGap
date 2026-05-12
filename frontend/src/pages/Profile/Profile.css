@@ -18,7 +18,7 @@
 .profile-banner-overlay { position: absolute; bottom: 0; left: 0; right: 0; height: 80px; background: linear-gradient(to top, #171717 0%, #17171770 50%, transparent 100%); pointer-events: none; z-index: 2; }
 
 /* ─── HERO (intégré dans la bannière) ─── */
-.profile-hero { position: relative; z-index: 3; width: 100%; max-width: 1280px; margin: 0 auto; padding: 0 48px; display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: center; animation: fade-up 0.5s ease both; }
+.profile-hero { position: relative; z-index: 3; grid-template-columns: auto 1fr auto; width: 100%; max-width: 1280px; margin: 0 auto; padding: 0 48px; display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: center; animation: fade-up 0.5s ease both; }
 .profile-avatar-wrap { position: relative; }
 .profile-avatar { width: 200px; height: 200px; border-radius: 18px; border: 3px solid; background: #1f1f1f; overflow: hidden; box-shadow: 0 16px 40px #00000080; transition: transform 0.3s; }
 .profile-avatar:hover { transform: translateY(-2px); }

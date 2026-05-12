@@ -7,6 +7,8 @@ import api from '../../api/client'
 import TcgCard from '../../components/ui/TcgCard'
 import { TIER_COLORS, APEX_TIERS } from '../Player/constants'
 import { getTierImage } from '../Player/utils'
+import BannerStickers from './components/BannerStickers'
+
 
 const REGIONS = ['EUW','EUNE','NA','KR','BR','JP','TR','OCE']
 
@@ -399,6 +401,10 @@ export default function Profile() {
             </button>
           )}
         </div>
+          <BannerStickers
+          userId={profile?.id}
+          isOwnProfile={isOwnProfile}
+        />
         </div>{/* fin .profile-hero */}
       </div>{/* fin .profile-banner */}
 

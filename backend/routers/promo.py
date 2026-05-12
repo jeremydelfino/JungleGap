@@ -5,7 +5,7 @@ from typing import Optional
 from database import get_db
 from models.user import User
 from models.user_card import UserCard
-from models.promo_code import PromoCode, PromoCodeUse
+from models.promo import PromoCode, PromoCodeUse
 from deps import get_current_user
 
 router = APIRouter(prefix="/promo", tags=["promo"])
@@ -16,11 +16,13 @@ class RedeemSchema(BaseModel):
     code: str
 
 class CreatePromoSchema(BaseModel):
-    code:         str
-    description:  Optional[str] = None
-    coins_amount: int            = 0
-    card_id:      Optional[int] = None
-    max_uses:     Optional[int] = None   # None = illimité au total
+    code:             str
+    description:      Optional[str] = None
+    coins_amount:     int           = 0
+    card_id:          Optional[int] = None
+    lootbox_type_id:  Optional[int] = None
+    lootbox_quantity: Optional[int] = None
+    max_uses:         Optional[int] = None   # None = illimité au total
 
 class TogglePromoSchema(BaseModel):
     is_active: bool
@@ -71,6 +73,17 @@ def redeem_code(
                 "rarity":    promo.card.rarity,
                 "image_url": promo.card.image_url,
             }
+    if promo.lootbox_type_id and promo.lootbox_quantity and promo.lootbox_quantity > 0:
+        from models.lootbox import LootBox
+        for _ in range(promo.lootbox_quantity):
+            db.add(LootBox(
+                user_id=current_user.id,
+                box_type_id=promo.lootbox_type_id,
+            ))
+        rewards["lootbox"] = {
+            "name":     promo.lootbox_type.name,
+            "quantity": promo.lootbox_quantity,
+        }
 
     # ── Enregistrement de l'utilisation ──
     db.add(PromoCodeUse(promo_code_id=promo.id, user_id=current_user.id))
@@ -97,14 +110,16 @@ def create_promo(body: CreatePromoSchema, db: Session = Depends(get_db)):
     code_str = body.code.strip().upper()
     if db.query(PromoCode).filter(PromoCode.code == code_str).first():
         raise HTTPException(400, "Ce code existe déjà")
-    if body.coins_amount == 0 and body.card_id is None:
-        raise HTTPException(400, "Un code doit donner au moins des coins ou une carte")
+    if body.coins_amount == 0 and body.card_id is None and body.lootbox_type_id is None:
+        raise HTTPException(400, "Un code doit donner au moins des coins, une carte ou une caisse")
 
     promo = PromoCode(
         code=code_str,
         description=body.description,
         coins_amount=body.coins_amount,
         card_id=body.card_id,
+        lootbox_type_id=body.lootbox_type_id,
+        lootbox_quantity=body.lootbox_quantity,
         max_uses=body.max_uses,
     )
     db.add(promo)
@@ -146,5 +161,9 @@ def _serialize(p: PromoCode):
         "max_uses":     p.max_uses,
         "uses_count":   p.uses_count,
         "is_active":    p.is_active,
+        "lootbox": (
+            {"id": p.lootbox_type.id, "name": p.lootbox_type.name, "quantity": p.lootbox_quantity}
+            if p.lootbox_type_id else None
+        ),
         "created_at":   p.created_at.isoformat() if p.created_at else None,
     }

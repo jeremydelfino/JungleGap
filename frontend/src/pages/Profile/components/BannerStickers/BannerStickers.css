@@ -1,0 +1,56 @@
+/* ─── ANIMATIONS ─── */
+@keyframes bs-fade-in       { from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:translateY(0)} }
+@keyframes bs-modal-pop     { from{opacity:0; transform:scale(0.92)} to{opacity:1; transform:scale(1)} }
+@keyframes bs-pulse-add     { 0%,100%{box-shadow:0 0 0 0 #65BD6240} 50%{box-shadow:0 0 0 8px #65BD6200} }
+
+/* ─── STICKER ABSOLU ─── */
+.bs-sticker                 { position:absolute; width:100px; height:100px; transform:translate(-50%, -50%); cursor:grab; user-select:none; z-index:5; transition:filter 0.2s ease, transform 0.05s ease; animation:bs-fade-in 0.4s ease both; }
+.bs-sticker img             { width:100%; height:100%; object-fit:contain; pointer-events:none; filter:drop-shadow(0 6px 14px #00000080); }
+.bs-sticker.dragging        { cursor:grabbing; z-index:10; filter:drop-shadow(0 12px 24px #000000aa); transform:translate(-50%, -50%) scale(1.08); }
+.bs-sticker:active          { cursor:grabbing; }
+
+/* Glow par rareté */
+.bs-sticker.r-common img    { filter:drop-shadow(0 6px 14px #00000080); }
+.bs-sticker.r-rare img      { filter:drop-shadow(0 0 12px #3b82f680) drop-shadow(0 6px 14px #00000080); }
+.bs-sticker.r-epic img      { filter:drop-shadow(0 0 16px #a855f790) drop-shadow(0 6px 14px #00000080); }
+.bs-sticker.r-legendary img { filter:drop-shadow(0 0 20px #c89b3cb0) drop-shadow(0 6px 14px #00000080); }
+
+/* Bouton retirer */
+.bs-sticker-remove          { position:absolute; top:-6px; right:-6px; width:22px; height:22px; border-radius:50%; background:#171717; color:#fff; border:2px solid #ffffff20; font-size:14px; line-height:1; cursor:pointer; opacity:0; transition:all 0.15s ease; font-family:'Outfit',sans-serif; font-weight:700; display:flex; align-items:center; justify-content:center; padding:0; z-index:6; }
+.bs-sticker:hover .bs-sticker-remove { opacity:1; }
+.bs-sticker-remove:hover    { background:#ef4444; border-color:#ef4444; transform:scale(1.1); }
+
+/* ─── BOUTON AJOUTER ─── */
+.bs-add-btn                 { position:absolute; bottom:18px; right:18px; z-index:5; display:inline-flex; align-items:center; gap:6px; padding:8px 14px; border-radius:20px; background:#1f1f1fcc; border:1px solid #65BD6240; color:#65BD62; font-family:'Outfit',sans-serif; font-weight:700; font-size:12px; letter-spacing:0.5px; cursor:pointer; backdrop-filter:blur(8px); transition:all 0.2s ease; animation:bs-pulse-add 2.5s ease-in-out infinite; }
+.bs-add-btn span            { font-size:16px; font-weight:900; line-height:1; }
+.bs-add-btn:hover           { background:#65BD62; color:#0d1a0d; border-color:#65BD62; transform:translateY(-1px); }
+
+/* ─── PICKER MODAL (en portal, plein écran) ─── */
+.bs-picker-overlay          { position:fixed; inset:0; background:#000000d0; backdrop-filter:blur(10px); z-index:9999; display:flex; align-items:center; justify-content:center; padding:24px; animation:bs-fade-in 0.2s ease both; }
+.bs-picker                  { background:linear-gradient(180deg, #1f1f1f 0%, #1a1a1a 100%); border:1px solid #ffffff15; border-radius:18px; max-width:760px; width:100%; max-height:85vh; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 24px 60px #000000cc; animation:bs-modal-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.bs-picker-head             { position:relative; padding:26px 30px 22px; border-bottom:1px solid #ffffff08; }
+.bs-picker-eyebrow          { font-family:'Inter',sans-serif; font-size:11px; font-weight:700; letter-spacing:2.5px; color:#c89b3c; margin-bottom:6px; }
+.bs-picker-title            { font-family:'Outfit',sans-serif; font-size:26px; font-weight:900; color:#e8eaf0; margin:0; letter-spacing:-0.5px; }
+.bs-picker-close            { position:absolute; top:22px; right:22px; width:34px; height:34px; border-radius:8px; background:#ffffff08; border:1px solid #ffffff10; color:#9ca3af; cursor:pointer; font-size:20px; font-family:'Outfit',sans-serif; font-weight:700; transition:all 0.15s ease; }
+.bs-picker-close:hover      { background:#ef444420; border-color:#ef444460; color:#ef4444; }
+
+.bs-picker-grid             { padding:26px 30px; display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:16px; overflow-y:auto; }
+.bs-picker-card             { position:relative; aspect-ratio:1; border-radius:14px; border:2px solid; overflow:hidden; cursor:pointer; transition:all 0.2s ease; background:#1a1a1a; padding:0; }
+.bs-picker-card:hover       { transform:translateY(-4px) scale(1.04); }
+.bs-picker-card img         { width:100%; height:100%; object-fit:cover; }
+.bs-picker-card-name        { position:absolute; bottom:0; left:0; right:0; padding:8px 10px; font-family:'Outfit',sans-serif; font-size:12px; font-weight:700; color:#e8eaf0; background:linear-gradient(to top, #000000d8, transparent); text-align:left; }
+.bs-picker-card.r-common    { border-color:#9ca3af50; }
+.bs-picker-card.r-rare      { border-color:#3b82f6; box-shadow:0 0 10px #3b82f640; }
+.bs-picker-card.r-epic      { border-color:#a855f7; box-shadow:0 0 14px #a855f750; }
+.bs-picker-card.r-legendary { border-color:#c89b3c; box-shadow:0 0 18px #c89b3c60; }
+
+.bs-picker-empty            { padding:80px 24px; text-align:center; }
+.bs-picker-empty-icon       { font-size:56px; opacity:0.4; margin-bottom:16px; }
+.bs-picker-empty-title      { font-family:'Outfit',sans-serif; font-size:20px; font-weight:800; color:#e8eaf0; margin-bottom:8px; }
+.bs-picker-empty-sub        { font-family:'Inter',sans-serif; font-size:14px; color:#6b7280; }
+
+/* Sur mobile : stickers plus petits */
+@media (max-width: 720px) {
+  .bs-sticker                { width:70px; height:70px; }
+  .bs-add-btn                { bottom:12px; right:12px; padding:6px 12px; font-size:11px; }
+}

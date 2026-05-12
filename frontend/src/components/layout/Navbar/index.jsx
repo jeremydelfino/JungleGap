@@ -186,6 +186,7 @@ export default function Navbar() {
             { path: '/games',      icon: '🎮', label: 'Jeux' },
             { path: '/bets',       icon: '🎯', label: 'Mes Paris' },
             { path: '/leaderboard',icon: '🏆', label: 'Classement' },
+            { path: '/lootbox',     icon: '🃏', label: 'Collection' },
           ].map(({ path, icon, label }) => (
             <button
               key={path}
@@ -306,6 +307,11 @@ export default function Navbar() {
           <button className={`bottom-nav-item ${isActive('/games') ? 'active' : ''}`} onClick={() => navigate('/games')}>
             <div className="bnav-icon-wrap">🎮{isActive('/games') && <span className="bnav-active-dot" />}</div>
             <span className="bnav-label">Jeux</span>
+          </button>
+
+          <button className={`bottom-nav-item ${isActive('/lootbox') ? 'active' : ''}`} onClick={() => navigate('/lootbox')}>
+            <div className="bnav-icon-wrap">🃏{isActive('/lootbox') && <span className="bnav-active-dot" />}</div>
+            <span className="bnav-label">Collection</span>
           </button>
 
           {/* Notifs mobile */}

@@ -161,6 +161,60 @@ def admin_create_box_type(
     return {"success": True, "id": box_type.id, "name": box_type.name}
 
 
+# ─── POST /lootbox/buy/{box_type_id} ───────────────────────
+@router.post("/buy/{box_type_id}")
+def buy_box(
+    box_type_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Achat d'une caisse contre des coins."""
+    box_type = (
+        db.query(LootBoxType)
+        .filter(LootBoxType.id == box_type_id)
+        .first()
+    )
+    if not box_type:
+        raise HTTPException(404, "Type de caisse introuvable")
+    if not box_type.is_active:
+        raise HTTPException(400, "Cette caisse n'est plus disponible")
+    if box_type.price_coins is None:
+        raise HTTPException(400, "Cette caisse n'est pas achetable")
+
+    # Lock user pour éviter double-spend
+    user = (
+        db.query(User)
+        .filter(User.id == current_user.id)
+        .with_for_update()
+        .first()
+    )
+    if user.coins < box_type.price_coins:
+        raise HTTPException(400, f"Coins insuffisants ({user.coins}/{box_type.price_coins})")
+
+    user.coins -= box_type.price_coins
+    box = LootBox(user_id=user.id, box_type_id=box_type.id)
+    db.add(box)
+
+    from models.transaction import Transaction
+    db.add(Transaction(
+        user_id=user.id,
+        type="lootbox_purchase",
+        amount=-box_type.price_coins,
+        description=f"Achat caisse: {box_type.name}",
+    ))
+    db.commit()
+    db.refresh(box)
+
+    return {
+        "success":         True,
+        "lootbox_id":      box.id,
+        "coins_remaining": user.coins,
+        "box_type": {
+            "id":   box_type.id,
+            "name": box_type.name,
+        },
+    }
+
 # ─── ADMIN — Donner une caisse à un user (debug/cadeaux) ───
 @router.post("/admin/grant/{user_id}/{box_type_id}")
 def admin_grant_box(
@@ -180,3 +234,98 @@ def admin_grant_box(
         db.add(LootBox(user_id=user_id, box_type_id=box_type_id))
     db.commit()
     return {"success": True, "granted": quantity, "to_user_id": user_id}
+
+# ─── ADMIN — GET /lootbox/admin/types (tous, actifs + inactifs) ────
+@router.get("/admin/types")
+def admin_list_box_types(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(403, "Admin uniquement")
+    types = db.query(LootBoxType).order_by(LootBoxType.id).all()
+    return [
+        {
+            "id":          t.id,
+            "name":        t.name,
+            "description": t.description,
+            "image_url":   t.image_url,
+            "price_coins": t.price_coins,
+            "pool_types":  t.pool_types,
+            "is_active":   t.is_active,
+            "drop_rates": {
+                "common":    t.drop_common,
+                "rare":      t.drop_rare,
+                "epic":      t.drop_epic,
+                "legendary": t.drop_legendary,
+            },
+        }
+        for t in types
+    ]
+
+
+# ─── ADMIN — PATCH /lootbox/admin/types/{id} ───────────────
+class PatchBoxTypeSchema(BaseModel):
+    name:           Optional[str]   = None
+    description:    Optional[str]   = None
+    image_url:      Optional[str]   = None
+    price_coins:    Optional[int]   = None
+    pool_types:     Optional[str]   = None
+    drop_common:    Optional[int]   = None
+    drop_rare:      Optional[int]   = None
+    drop_epic:      Optional[int]   = None
+    drop_legendary: Optional[int]   = None
+    is_active:      Optional[bool]  = None
+
+
+@router.patch("/admin/types/{box_type_id}")
+def admin_patch_box_type(
+    box_type_id: int,
+    body: PatchBoxTypeSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(403, "Admin uniquement")
+    bt = db.query(LootBoxType).filter(LootBoxType.id == box_type_id).first()
+    if not bt:
+        raise HTTPException(404, "Type de caisse introuvable")
+
+    updates = body.model_dump(exclude_unset=True)
+    for k, v in updates.items():
+        setattr(bt, k, v)
+
+    # Si on touche aux drop rates → revalider le total
+    if any(k.startswith("drop_") for k in updates):
+        total = bt.drop_common + bt.drop_rare + bt.drop_epic + bt.drop_legendary
+        if total != 100:
+            db.rollback()
+            raise HTTPException(400, f"Drop rates doivent totaliser 100 (actuel: {total})")
+
+    db.commit()
+    db.refresh(bt)
+    return {"success": True, "id": bt.id}
+
+
+# ─── ADMIN — DELETE /lootbox/admin/types/{id} ──────────────
+@router.delete("/admin/types/{box_type_id}")
+def admin_delete_box_type(
+    box_type_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(403, "Admin uniquement")
+    bt = db.query(LootBoxType).filter(LootBoxType.id == box_type_id).first()
+    if not bt:
+        raise HTTPException(404, "Type de caisse introuvable")
+
+    has_boxes = db.query(LootBox).filter(LootBox.box_type_id == box_type_id).first() is not None
+    if has_boxes:
+        bt.is_active = False
+        db.commit()
+        return {"success": True, "mode": "soft", "message": "Désactivé (des caisses existent en circulation)"}
+
+    db.delete(bt)
+    db.commit()
+    return {"success": True, "mode": "hard"}

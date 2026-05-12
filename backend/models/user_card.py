@@ -14,6 +14,8 @@ class UserCard(Base):
     quantity       = Column(Integer, nullable=False, default=1)
     equipped_slot  = Column(String(10), nullable=True)
     obtained_at    = Column(TIMESTAMP, server_default=func.now())
+    position_x = Column(Integer, nullable=True)
+    position_y = Column(Integer, nullable=True)
 
     card = relationship("Card")
 

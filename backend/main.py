@@ -8,7 +8,7 @@ from apscheduler.triggers.cron import CronTrigger
 from services.game_poller import poll_pro_games
 from database import engine, Base
 
-# Modèles existants
+# Models
 import models.user, models.card, models.player, models.match
 import models.live_game, models.bet, models.bet_type
 import models.transaction, models.user_card, models.pro_player
@@ -19,13 +19,12 @@ import models.esports_team
 import models.esports_player
 import models.esports_team_rating
 
-# Nouveaux modèles
 import models.job_run
 import models.champion_stats
 import models.champion_synergy
 import models.team_form
-import models.lootbox as _lootbox_models  # noqa
-
+import models.lootbox as _lootbox_models
+from models.promo import PromoCode, PromoCodeUse
 # Routers
 from routers import auth, players, bets, coins, profile, upload, admin, games, favorites, leaderboard, social
 from routers import esports
@@ -34,6 +33,7 @@ from routers.settings import router as settings_router
 from routers import odds_debug
 from routers import coachdiff
 from routers import lootbox
+from routers import promo
 # Services
 from services.esports_sync import sync_all_teams
 from services.champion_winrate_collector import refresh_champion_winrates
@@ -175,7 +175,7 @@ app.include_router(admin_jobs.router)
 app.include_router(coachdiff.router)
 app.include_router(social.router)
 app.include_router(lootbox.router)
-
+app.include_router(promo.router)
 
 
 
